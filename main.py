@@ -585,7 +585,7 @@ def generate_3d_coaster(
         job_id: Job identifier
     
     Returns:
-        Tuple of (body_stl_path, logos_stl_path, preview_path)
+        Tuple of (body_stl_path, logos_stl_path)
     """
     logger.info("="*60)
     logger.info("GENERATE 3D COASTER - Starting 3D generation")
@@ -761,77 +761,11 @@ def generate_3d_coaster(
             f.write(svg_string)
         logger.info(f"Debug SVG saved: {debug_svg_path}")
     
-    # Generate preview image
-    logger.info("Generating preview image...")
-    preview_path = generate_preview(base, final_logos, base_name)
-    logger.info(f"Preview generated: {preview_path}")
-    
     logger.info("="*60)
     logger.info("3D COASTER GENERATION COMPLETE")
-    logger.info(f"Files: Body={body_stl_path}, Logos={logos_stl_path}, Preview={preview_path}")
+    logger.info(f"Files: Body={body_stl_path}, Logos={logos_stl_path}")
     
-    return body_stl_path, logos_stl_path, preview_path
-
-
-def generate_preview(base: trimesh.Trimesh, logos: trimesh.Trimesh, base_name: str) -> str:
-    """
-    Generate preview image showing 3D coaster.
-    
-    Args:
-        base: Base cylinder mesh
-        logos: Logo meshes
-        base_name: Base filename
-    
-    Returns:
-        Path to preview image
-    """
-    fig = plt.figure(figsize=(12, 6))
-    
-    # Side view
-    ax1 = fig.add_subplot(121, projection='3d')
-    
-    # Plot base
-    base_faces = base.faces
-    base_verts = base.vertices
-    ax1.plot_trisurf(base_verts[:, 0], base_verts[:, 1], base_verts[:, 2],
-                     triangles=base_faces, alpha=0.3, color='gray', edgecolor='none')
-    
-    # Plot logos
-    logo_faces = logos.faces
-    logo_verts = logos.vertices
-    ax1.plot_trisurf(logo_verts[:, 0], logo_verts[:, 1], logo_verts[:, 2],
-                     triangles=logo_faces, alpha=0.9, color='red', edgecolor='none')
-    
-    ax1.set_title("Side View")
-    ax1.set_xlabel("X")
-    ax1.set_ylabel("Y")
-    ax1.set_zlabel("Z")
-    ax1.view_init(elev=0, azim=0)
-    
-    # Top view
-    ax2 = fig.add_subplot(122, projection='3d')
-    
-    # Plot base
-    ax2.plot_trisurf(base_verts[:, 0], base_verts[:, 1], base_verts[:, 2],
-                     triangles=base_faces, alpha=0.3, color='gray', edgecolor='none')
-    
-    # Plot logos
-    ax2.plot_trisurf(logo_verts[:, 0], logo_verts[:, 1], logo_verts[:, 2],
-                     triangles=logo_faces, alpha=0.9, color='red', edgecolor='none')
-    
-    ax2.set_title("Top View")
-    ax2.set_xlabel("X")
-    ax2.set_ylabel("Y")
-    ax2.set_zlabel("Z")
-    ax2.view_init(elev=90, azim=-90)
-    
-    plt.tight_layout()
-    
-    preview_path = os.path.join(TEMP_DIR, f"{base_name}_preview.png")
-    plt.savefig(preview_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
-    
-    return preview_path
+    return body_stl_path, logos_stl_path
 
 
 async def process_coaster_job(
@@ -940,18 +874,16 @@ async def process_vectorization_3d(job_id: str):
         logger.info("STEP 2/2: Generating 3D model...")
         await update_job_status(job_id, "processing_3d", 90, "Generating 3D model...")
         logger.info("Calling generate_3d_coaster...")
-        body_path, logos_path, preview_path = generate_3d_coaster(svg_string, params, job_id)
+        body_path, logos_path = generate_3d_coaster(svg_string, params, job_id)
         logger.info(f"✓ 3D generation complete")
         logger.info(f"  - Body STL: {body_path}")
         logger.info(f"  - Logos STL: {logos_path}")
-        logger.info(f"  - Preview: {preview_path}")
         
         # Update job with file paths
         logger.info("Updating job status to completed...")
         job.files = {
             "body": body_path,
-            "logos": logos_path,
-            "preview": preview_path
+            "logos": logos_path
         }
         job.status = "completed"
         job.progress = 100
@@ -1069,8 +1001,7 @@ async def get_status(job_id: str):
     if job.status == "completed" and job.files:
         response.download_urls = {
             "body": f"/api/download/{job_id}/body",
-            "logos": f"/api/download/{job_id}/logos",
-            "preview": f"/api/download/{job_id}/preview"
+            "logos": f"/api/download/{job_id}/logos"
         }
     
     return response
@@ -1115,27 +1046,6 @@ async def download_logos(job_id: str):
         file_path,
         media_type="application/octet-stream",
         filename=f"coaster_{job_id}_Logos.stl"
-    )
-
-
-@app.get("/api/download/{job_id}/preview")
-async def download_preview(job_id: str):
-    """Download the coaster preview PNG file."""
-    job = JobStore.get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    
-    if job.status != "completed" or "preview" not in job.files:
-        raise HTTPException(status_code=400, detail="Preview not available")
-    
-    file_path = job.files["preview"]
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found on disk")
-    
-    return FileResponse(
-        file_path,
-        media_type="image/png",
-        filename=f"coaster_{job_id}_preview.png"
     )
 
 
@@ -1812,7 +1722,6 @@ async def get_frontend():
                 <div class="download-buttons" id="downloadButtons">
                     <a href="#" class="download-btn" id="downloadBody">Download Body STL</a>
                     <a href="#" class="download-btn" id="downloadLogos">Download Logos STL</a>
-                    <a href="#" class="download-btn" id="downloadPreview">Download Preview</a>
                 </div>
             </div>
             
@@ -1953,7 +1862,6 @@ async def get_frontend():
             // Update download links
             document.getElementById('downloadBody').href = urls.body;
             document.getElementById('downloadLogos').href = urls.logos;
-            document.getElementById('downloadPreview').href = urls.preview;
             
             // Initialize viewer if not already done
             if (!renderer) {
