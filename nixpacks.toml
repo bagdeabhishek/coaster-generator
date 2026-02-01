@@ -1,2 +1,12 @@
 [start]
-cmd = "gunicorn -w 4 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:3000 main:app"
+cmd = "gunicorn -k uvicorn.workers.UvicornWorker -b 0.0.0.0:3000 --workers $(nproc) --worker-connections 1000 --max-requests 1000 --max-requests-jitter 100 --timeout 120 --keep-alive 2 --forwarded-allow-ips '*' main:app"
+
+[build]
+builder = "nixpacks"
+
+[environment]
+DEBUG = "false"
+PYTHONUNBUFFERED = "1"
+TEMP_DIR = "./temp"
+MAX_WORKERS = "auto"
+LOG_LEVEL = "INFO"

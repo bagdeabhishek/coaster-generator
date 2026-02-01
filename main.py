@@ -28,12 +28,13 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# Debug flag - set to True to disable cleanup and keep all temp files
-DEBUG_NO_CLEANUP = True
+# Debug flag - read from environment variable (default to False for production)
+DEBUG_NO_CLEANUP = os.environ.get("DEBUG_NO_CLEANUP", "false").lower() in ("true", "1", "yes")
 
-# Configure logging to see everything in CLI
+# Configure logging based on environment
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stdout)
@@ -104,14 +105,43 @@ class StatusResponse(BaseModel):
     error: Optional[str] = None
 
 
-# Initialize FastAPI app
-app = FastAPI(title="3D Coaster Generator", version="1.0.0")
+# Initialize FastAPI app with optimized settings
+app = FastAPI(
+    title="3D Coaster Generator",
+    version="1.0.0",
+    docs_url="/docs" if DEBUG_NO_CLEANUP else None,
+    redoc_url="/redoc" if DEBUG_NO_CLEANUP else None,
+)
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize application on startup."""
     os.makedirs(TEMP_DIR, exist_ok=True)
+    logger.info(f"Application started. Debug mode: {DEBUG_NO_CLEANUP}")
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Coolify and monitoring."""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "1.0.0",
+        "active_jobs": len(jobs),
+        "debug_mode": DEBUG_NO_CLEANUP
+    }
+
+
+@app.get("/ready")
+async def readiness_check():
+    """Readiness check for Coolify."""
+    temp_dir_exists = os.path.exists(TEMP_DIR)
+    return {
+        "ready": temp_dir_exists,
+        "temp_dir": TEMP_DIR,
+        "timestamp": datetime.now().isoformat()
+    }
 
 
 async def update_job_status(job_id: str, status: str, progress: int, message: str):
@@ -125,6 +155,7 @@ async def update_job_status(job_id: str, status: str, progress: int, message: st
 async def bfl_flux_process(image_bytes: bytes, api_key: str) -> bytes:
     """
     Process image through BFL FLUX API to create flat vector illustration.
+    Optimized to use aiohttp for true async HTTP requests.
     
     Args:
         image_bytes: Raw image bytes
@@ -133,8 +164,6 @@ async def bfl_flux_process(image_bytes: bytes, api_key: str) -> bytes:
     Returns:
         Processed PNG image bytes
     """
-    import requests
-    
     logger.info("="*60)
     logger.info("BFL FLUX PROCESS - Starting image processing")
     logger.info(f"Input image size: {len(image_bytes)} bytes")
@@ -157,7 +186,6 @@ async def bfl_flux_process(image_bytes: bytes, api_key: str) -> bytes:
         prompt = "flat vector illustration, solid colors, no gradients, high contrast, 2d cartoon style, white background, clean lines suitable for vector tracing"
     
     # Set parameters based on BFL API documentation
-    # Note: guidance and steps are [flex only], not available for klein endpoint
     width = 1024
     height = 1024
     seed = 432262096973491  # Same seed as ComfyUI workflow for reproducibility
@@ -183,28 +211,26 @@ async def bfl_flux_process(image_bytes: bytes, api_key: str) -> bytes:
     }
     
     logger.info(f"Submitting job to BFL API: {BFL_API_URL}/flux-2-klein-9b")
-    logger.debug(f"Headers: {headers}")
     logger.debug(f"Payload keys: {list(payload.keys())}")
     
-    # Submit job using synchronous requests in async context
-    loop = asyncio.get_event_loop()
-    
-    def submit_job():
+    # Use aiohttp session for true async HTTP requests
+    async with aiohttp.ClientSession() as session:
+        # Submit job
         logger.debug("Making POST request to BFL...")
-        response = requests.post(
+        async with session.post(
             f"{BFL_API_URL}/flux-2-klein-9b",
             headers=headers,
             json=payload,
-            timeout=30
-        )
-        logger.debug(f"BFL Response status: {response.status_code}")
-        if response.status_code != 200:
-            logger.error(f"BFL API error: {response.status_code}")
-            logger.error(f"Response text: {response.text[:500]}")
-            raise Exception(f"BFL API error: {response.status_code} - {response.text}")
-        return response.json()
+            timeout=aiohttp.ClientTimeout(total=30)
+        ) as response:
+            logger.debug(f"BFL Response status: {response.status}")
+            if response.status != 200:
+                text = await response.text()
+                logger.error(f"BFL API error: {response.status}")
+                logger.error(f"Response text: {text[:500]}")
+                raise Exception(f"BFL API error: {response.status} - {text}")
+            result = await response.json()
     
-    result = await loop.run_in_executor(None, submit_job)
     logger.info(f"BFL job submitted successfully")
     logger.debug(f"Response keys: {list(result.keys())}")
     
@@ -222,55 +248,61 @@ async def bfl_flux_process(image_bytes: bytes, api_key: str) -> bytes:
     
     # Poll for result using the provided polling_url
     logger.info("Starting polling loop...")
-    for attempt in range(MAX_POLLING_ATTEMPTS):
-        await asyncio.sleep(POLLING_INTERVAL)
-        logger.debug(f"Polling attempt {attempt + 1}/{MAX_POLLING_ATTEMPTS}...")
-        
-        def poll_job():
-            logger.debug(f"GET {polling_url}")
-            poll_response = requests.get(polling_url, headers=headers, timeout=10)
-            logger.debug(f"Poll response status: {poll_response.status_code}")
-            if poll_response.status_code != 200:
-                logger.warning(f"Poll failed with status {poll_response.status_code}")
-                return None
-            return poll_response.json()
-        
-        poll_result = await loop.run_in_executor(None, poll_job)
-        
-        if poll_result is None:
-            logger.warning(f"Poll attempt {attempt + 1} returned None, retrying...")
-            continue
-        
-        status = poll_result.get("status")
-        logger.info(f"Poll status: {status}")
-        
-        if status == "Ready":
-            logger.info("BFL job completed! Downloading result...")
-            # Extract the sample URL from result
-            result_data = poll_result.get("result", {})
-            sample_url = result_data.get("sample")
-            logger.info(f"Sample URL: {sample_url[:100]}...")
-            if sample_url:
-                # Download the result image
-                def download_image():
+    async with aiohttp.ClientSession() as session:
+        for attempt in range(MAX_POLLING_ATTEMPTS):
+            await asyncio.sleep(POLLING_INTERVAL)
+            logger.debug(f"Polling attempt {attempt + 1}/{MAX_POLLING_ATTEMPTS}...")
+            
+            try:
+                async with session.get(
+                    polling_url,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as poll_response:
+                    logger.debug(f"Poll response status: {poll_response.status}")
+                    if poll_response.status != 200:
+                        logger.warning(f"Poll failed with status {poll_response.status}")
+                        continue
+                    
+                    poll_result = await poll_response.json()
+            except asyncio.TimeoutError:
+                logger.warning(f"Poll attempt {attempt + 1} timed out, retrying...")
+                continue
+            except Exception as e:
+                logger.warning(f"Poll attempt {attempt + 1} failed: {e}, retrying...")
+                continue
+            
+            status = poll_result.get("status")
+            logger.info(f"Poll status: {status}")
+            
+            if status == "Ready":
+                logger.info("BFL job completed! Downloading result...")
+                # Extract the sample URL from result
+                result_data = poll_result.get("result", {})
+                sample_url = result_data.get("sample")
+                logger.info(f"Sample URL: {sample_url[:100]}...")
+                if sample_url:
+                    # Download the result image
                     logger.debug(f"Downloading from signed URL...")
-                    image_response = requests.get(sample_url, timeout=30)
-                    logger.debug(f"Download response status: {image_response.status_code}")
-                    if image_response.status_code == 200:
-                        logger.info(f"Downloaded image: {len(image_response.content)} bytes")
-                        return image_response.content
-                    logger.error(f"Download failed: {image_response.status_code}")
-                    return None
-                
-                image_data = await loop.run_in_executor(None, download_image)
-                if image_data:
-                    return image_data
-            raise Exception("No image URL in completed result")
-        
-        elif status in ["Failed", "Error"]:
-            raise Exception(f"BFL job failed: {poll_result.get('error', 'Unknown error')}")
-        
-        # Continue polling for Pending, Processing, etc.
+                    try:
+                        async with session.get(
+                            sample_url,
+                            timeout=aiohttp.ClientTimeout(total=30)
+                        ) as image_response:
+                            logger.debug(f"Download response status: {image_response.status}")
+                            if image_response.status == 200:
+                                image_data = await image_response.read()
+                                logger.info(f"Downloaded image: {len(image_data)} bytes")
+                                return image_data
+                            logger.error(f"Download failed: {image_response.status}")
+                    except asyncio.TimeoutError:
+                        logger.error("Download timed out")
+                raise Exception("No image URL in completed result")
+            
+            elif status in ["Failed", "Error"]:
+                raise Exception(f"BFL job failed: {poll_result.get('error', 'Unknown error')}")
+            
+            # Continue polling for Pending, Processing, etc.
     
     raise Exception(f"BFL job timed out after {MAX_POLLING_ATTEMPTS * POLLING_INTERVAL} seconds")
 
