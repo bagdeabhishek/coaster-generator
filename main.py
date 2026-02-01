@@ -252,9 +252,33 @@ async def startup_event():
     """Initialize application on startup."""
     os.makedirs(TEMP_DIR, exist_ok=True)
     os.makedirs(JOBS_DIR, exist_ok=True)
-    # Clean up old jobs on startup
-    JobStore.cleanup_old_jobs(max_age_hours=24)
+    # Clean up old jobs on startup (non-blocking, only on one worker)
+    cleanup_lock_file = os.path.join(TEMP_DIR, ".cleanup_lock")
+    try:
+        # Try to create lock file - if it exists, another worker is doing cleanup
+        if not os.path.exists(cleanup_lock_file):
+            with open(cleanup_lock_file, 'w') as f:
+                f.write(str(os.getpid()))
+            # Run cleanup asynchronously so it doesn't block startup
+            asyncio.create_task(async_cleanup_old_jobs(cleanup_lock_file))
+    except Exception as e:
+        logger.warning(f"Could not start cleanup: {e}")
+    
     logger.info(f"Application started. Debug mode: {DEBUG_NO_CLEANUP}")
+
+
+async def async_cleanup_old_jobs(lock_file: str, max_age_hours: int = 24):
+    """Async cleanup that runs in background."""
+    try:
+        await asyncio.sleep(5)  # Wait 5 seconds after startup to let things settle
+        JobStore.cleanup_old_jobs(max_age_hours)
+    finally:
+        # Remove lock file when done
+        try:
+            if os.path.exists(lock_file):
+                os.remove(lock_file)
+        except Exception:
+            pass
 
 
 @app.get("/health")
