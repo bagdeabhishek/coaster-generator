@@ -10,9 +10,11 @@ import uuid
 import asyncio
 import logging
 import sys
+import json
+import fcntl
 from datetime import datetime
 from typing import Optional, Dict, Any
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 
 import aiohttp
 import trimesh
@@ -65,8 +67,10 @@ logger.info(f"BFL_API_URL: {BFL_API_URL}")
 os.makedirs(TEMP_DIR, exist_ok=True)
 logger.info(f"Temp directory ensured: {os.path.abspath(TEMP_DIR)}")
 
-# In-memory job storage
-jobs: Dict[str, 'Job'] = {}
+# Job storage directory (shared across all workers)
+JOBS_DIR = os.path.join(TEMP_DIR, "jobs")
+os.makedirs(JOBS_DIR, exist_ok=True)
+logger.info(f"Jobs directory: {JOBS_DIR}")
 
 
 @dataclass
@@ -79,9 +83,138 @@ class Job:
     files: Dict[str, str] = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.now)
     error: Optional[str] = None
-    preview_image: Optional[bytes] = None  # BFL generated image for review
+    preview_image_path: Optional[str] = None  # Path to saved preview image
     params: Optional['ProcessRequest'] = None  # Store params for confirmation step
     api_key: Optional[str] = None  # User-provided BFL API key (optional)
+    
+    def to_dict(self) -> dict:
+        """Convert job to dictionary for JSON serialization."""
+        return {
+            "job_id": self.job_id,
+            "status": self.status,
+            "progress": self.progress,
+            "message": self.message,
+            "files": self.files,
+            "created_at": self.created_at.isoformat(),
+            "error": self.error,
+            "preview_image_path": self.preview_image_path,
+            "params": self.params.dict() if self.params else None,
+            "api_key": self.api_key
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'Job':
+        """Create job from dictionary."""
+        job = cls(
+            job_id=data["job_id"],
+            status=data["status"],
+            progress=data["progress"],
+            message=data["message"],
+            files=data.get("files", {}),
+            error=data.get("error"),
+            preview_image_path=data.get("preview_image_path"),
+            api_key=data.get("api_key")
+        )
+        job.created_at = datetime.fromisoformat(data["created_at"])
+        if data.get("params"):
+            job.params = ProcessRequest(**data["params"])
+        return job
+
+
+class JobStore:
+    """File-based job storage shared across all workers."""
+    
+    @staticmethod
+    def _get_job_path(job_id: str) -> str:
+        """Get file path for job data."""
+        return os.path.join(JOBS_DIR, f"{job_id}.json")
+    
+    @staticmethod
+    def _get_preview_path(job_id: str) -> str:
+        """Get file path for preview image."""
+        return os.path.join(JOBS_DIR, f"{job_id}_preview.png")
+    
+    @classmethod
+    def save_job(cls, job: Job) -> None:
+        """Save job to disk with file locking."""
+        job_path = cls._get_job_path(job.job_id)
+        try:
+            with open(job_path, 'w') as f:
+                # Acquire exclusive lock
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                json.dump(job.to_dict(), f)
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            logger.debug(f"Job {job.job_id} saved to disk")
+        except Exception as e:
+            logger.error(f"Failed to save job {job.job_id}: {e}")
+    
+    @classmethod
+    def get_job(cls, job_id: str) -> Optional[Job]:
+        """Load job from disk."""
+        job_path = cls._get_job_path(job_id)
+        if not os.path.exists(job_path):
+            return None
+        
+        try:
+            with open(job_path, 'r') as f:
+                # Acquire shared lock for reading
+                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                data = json.load(f)
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            job = Job.from_dict(data)
+            logger.debug(f"Job {job_id} loaded from disk")
+            return job
+        except Exception as e:
+            logger.error(f"Failed to load job {job_id}: {e}")
+            return None
+    
+    @classmethod
+    def save_preview_image(cls, job_id: str, image_bytes: bytes) -> str:
+        """Save preview image to disk."""
+        preview_path = cls._get_preview_path(job_id)
+        try:
+            with open(preview_path, 'wb') as f:
+                f.write(image_bytes)
+            logger.debug(f"Preview image saved for job {job_id}: {preview_path}")
+            return preview_path
+        except Exception as e:
+            logger.error(f"Failed to save preview image for job {job_id}: {e}")
+            raise
+    
+    @classmethod
+    def get_preview_image(cls, job_id: str) -> Optional[bytes]:
+        """Load preview image from disk."""
+        preview_path = cls._get_preview_path(job_id)
+        if not os.path.exists(preview_path):
+            return None
+        
+        try:
+            with open(preview_path, 'rb') as f:
+                return f.read()
+        except Exception as e:
+            logger.error(f"Failed to load preview image for job {job_id}: {e}")
+            return None
+    
+    @classmethod
+    def cleanup_old_jobs(cls, max_age_hours: int = 24) -> None:
+        """Clean up job files older than specified hours."""
+        try:
+            now = datetime.now()
+            for filename in os.listdir(JOBS_DIR):
+                if filename.endswith('.json') or filename.endswith('_preview.png'):
+                    filepath = os.path.join(JOBS_DIR, filename)
+                    file_time = datetime.fromtimestamp(os.path.getmtime(filepath))
+                    age_hours = (now - file_time).total_seconds() / 3600
+                    
+                    if age_hours > max_age_hours:
+                        os.remove(filepath)
+                        logger.info(f"Cleaned up old job file: {filename}")
+        except Exception as e:
+            logger.error(f"Error during job cleanup: {e}")
+
+
+# Backward compatibility - use JobStore methods
+jobs = JobStore()  # This provides a dict-like interface
 
 
 class ProcessRequest(BaseModel):
@@ -118,17 +251,25 @@ app = FastAPI(
 async def startup_event():
     """Initialize application on startup."""
     os.makedirs(TEMP_DIR, exist_ok=True)
+    os.makedirs(JOBS_DIR, exist_ok=True)
+    # Clean up old jobs on startup
+    JobStore.cleanup_old_jobs(max_age_hours=24)
     logger.info(f"Application started. Debug mode: {DEBUG_NO_CLEANUP}")
 
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint for Coolify and monitoring."""
+    # Count job files in jobs directory
+    job_count = 0
+    if os.path.exists(JOBS_DIR):
+        job_count = len([f for f in os.listdir(JOBS_DIR) if f.endswith('.json')])
+    
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "version": "1.0.0",
-        "active_jobs": len(jobs),
+        "active_jobs": job_count,
         "debug_mode": DEBUG_NO_CLEANUP
     }
 
@@ -145,11 +286,13 @@ async def readiness_check():
 
 
 async def update_job_status(job_id: str, status: str, progress: int, message: str):
-    """Update job status in memory."""
-    if job_id in jobs:
-        jobs[job_id].status = status
-        jobs[job_id].progress = progress
-        jobs[job_id].message = message
+    """Update job status on disk."""
+    job = JobStore.get_job(job_id)
+    if job:
+        job.status = status
+        job.progress = progress
+        job.message = message
+        JobStore.save_job(job)
 
 
 async def bfl_flux_process(image_bytes: bytes, api_key: str) -> bytes:
@@ -687,7 +830,9 @@ async def process_coaster_job(
     
     try:
         # Get job object to access stored API key
-        job = jobs[job_id]
+        job = JobStore.get_job(job_id)
+        if not job:
+            raise Exception(f"Job {job_id} not found")
         
         # Get API key - use job's key if provided, otherwise fall back to env var
         api_key = job.api_key or os.environ.get("BFL_API_KEY")
@@ -707,12 +852,17 @@ async def process_coaster_job(
         flattened_image = await bfl_flux_process(image_bytes, api_key)
         logger.info(f"✓ Flattening complete: {len(flattened_image)} bytes")
         
-        # Store the preview image and params for confirmation step
-        jobs[job_id].preview_image = flattened_image
-        jobs[job_id].params = params
-        jobs[job_id].status = "review"
-        jobs[job_id].progress = 50
-        jobs[job_id].message = "Image generated! Please review and confirm to proceed."
+        # Save preview image to disk for persistence across workers
+        preview_path = JobStore.save_preview_image(job_id, flattened_image)
+        
+        # Update job with paths and params for confirmation step
+        job.preview_image_path = preview_path
+        job.params = params
+        job.status = "review"
+        job.progress = 50
+        job.message = "Image generated! Please review and confirm to proceed."
+        JobStore.save_job(job)
+        
         logger.info(f"✓✓✓ JOB {job_id} READY FOR REVIEW ✓✓✓")
         logger.info("="*60)
         
@@ -724,10 +874,13 @@ async def process_coaster_job(
         logger.exception("Full traceback:")
         logger.error("="*60)
         
-        jobs[job_id].status = "failed"
-        jobs[job_id].progress = 0
-        jobs[job_id].message = f"Error: {str(e)}"
-        jobs[job_id].error = str(e)
+        job = JobStore.get_job(job_id)
+        if job:
+            job.status = "failed"
+            job.progress = 0
+            job.message = f"Error: {str(e)}"
+            job.error = str(e)
+            JobStore.save_job(job)
 
 
 async def process_vectorization_3d(job_id: str):
@@ -741,8 +894,12 @@ async def process_vectorization_3d(job_id: str):
     logger.info(f"PHASE 2 STARTED - Job ID: {job_id}")
     
     try:
-        job = jobs[job_id]
-        flattened_image = job.preview_image
+        job = JobStore.get_job(job_id)
+        if not job:
+            raise Exception(f"Job {job_id} not found")
+        
+        # Load preview image from disk
+        flattened_image = JobStore.get_preview_image(job_id)
         params = job.params
         
         if not flattened_image or not params:
@@ -767,14 +924,16 @@ async def process_vectorization_3d(job_id: str):
         
         # Update job with file paths
         logger.info("Updating job status to completed...")
-        jobs[job_id].files = {
+        job.files = {
             "body": body_path,
             "logos": logos_path,
             "preview": preview_path
         }
-        jobs[job_id].status = "completed"
-        jobs[job_id].progress = 100
-        jobs[job_id].message = "Coaster generation complete!"
+        job.status = "completed"
+        job.progress = 100
+        job.message = "Coaster generation complete!"
+        JobStore.save_job(job)
+        
         logger.info(f"✓✓✓ JOB {job_id} COMPLETED SUCCESSFULLY ✓✓✓")
         logger.info("="*60)
         
@@ -786,10 +945,13 @@ async def process_vectorization_3d(job_id: str):
         logger.exception("Full traceback:")
         logger.error("="*60)
         
-        jobs[job_id].status = "failed"
-        jobs[job_id].progress = 0
-        jobs[job_id].message = f"Error: {str(e)}"
-        jobs[job_id].error = str(e)
+        job = JobStore.get_job(job_id)
+        if job:
+            job.status = "failed"
+            job.progress = 0
+            job.message = f"Error: {str(e)}"
+            job.error = str(e)
+            JobStore.save_job(job)
 
 
 @app.post("/api/process")
@@ -830,7 +992,8 @@ async def process_image(
     # Create job
     job_id = str(uuid.uuid4())
     # Use provided API key or None (will fallback to env var later)
-    jobs[job_id] = Job(job_id=job_id, api_key=api_key if api_key else None)
+    job = Job(job_id=job_id, api_key=api_key if api_key else None)
+    JobStore.save_job(job)
     logger.info(f"✓ Job created: {job_id}")
     
     # Read image bytes
@@ -866,10 +1029,9 @@ async def process_image(
 @app.get("/api/status/{job_id}", response_model=StatusResponse)
 async def get_status(job_id: str):
     """Get the current status of a job."""
-    if job_id not in jobs:
+    job = JobStore.get_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
-    job = jobs[job_id]
     
     response = StatusResponse(
         job_id=job.job_id,
@@ -893,10 +1055,10 @@ async def get_status(job_id: str):
 @app.get("/api/download/{job_id}/body")
 async def download_body(job_id: str):
     """Download the coaster body STL file."""
-    if job_id not in jobs:
+    job = JobStore.get_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     
-    job = jobs[job_id]
     if job.status != "completed" or "body" not in job.files:
         raise HTTPException(status_code=400, detail="Body file not available")
     
@@ -914,10 +1076,10 @@ async def download_body(job_id: str):
 @app.get("/api/download/{job_id}/logos")
 async def download_logos(job_id: str):
     """Download the coaster logos STL file."""
-    if job_id not in jobs:
+    job = JobStore.get_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     
-    job = jobs[job_id]
     if job.status != "completed" or "logos" not in job.files:
         raise HTTPException(status_code=400, detail="Logos file not available")
     
@@ -935,10 +1097,10 @@ async def download_logos(job_id: str):
 @app.get("/api/download/{job_id}/preview")
 async def download_preview(job_id: str):
     """Download the coaster preview PNG file."""
-    if job_id not in jobs:
+    job = JobStore.get_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     
-    job = jobs[job_id]
     if job.status != "completed" or "preview" not in job.files:
         raise HTTPException(status_code=400, detail="Preview not available")
     
@@ -958,16 +1120,21 @@ async def get_preview_image(job_id: str):
     """Get the BFL generated image for review (before confirmation)."""
     from starlette.responses import StreamingResponse
     
-    if job_id not in jobs:
+    job = JobStore.get_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     
-    job = jobs[job_id]
-    if job.status != "review" or not job.preview_image:
+    if job.status != "review":
+        raise HTTPException(status_code=400, detail="Preview image not available")
+    
+    # Load preview image from disk
+    preview_image = JobStore.get_preview_image(job_id)
+    if not preview_image:
         raise HTTPException(status_code=400, detail="Preview image not available")
     
     # Use StreamingResponse for in-memory bytes
     return StreamingResponse(
-        io.BytesIO(job.preview_image),
+        io.BytesIO(preview_image),
         media_type="image/png",
         headers={"Content-Disposition": f"inline; filename=preview_{job_id}.png"}
     )
@@ -976,10 +1143,10 @@ async def get_preview_image(job_id: str):
 @app.post("/api/confirm/{job_id}")
 async def confirm_job(job_id: str, background_tasks: BackgroundTasks):
     """Confirm the generated image and proceed with vectorization and 3D generation."""
-    if job_id not in jobs:
+    job = JobStore.get_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     
-    job = jobs[job_id]
     if job.status != "review":
         raise HTTPException(status_code=400, detail="Job is not in review state")
     
@@ -1017,10 +1184,10 @@ async def retry_job(
     bottom_rotate: int = Form(0)
 ):
     """Retry with a different image, keeping the same job ID."""
-    if job_id not in jobs:
+    job = JobStore.get_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     
-    job = jobs[job_id]
     if job.status != "review":
         raise HTTPException(status_code=400, detail="Job is not in review state")
     
@@ -1037,8 +1204,9 @@ async def retry_job(
     job.status = "pending"
     job.progress = 0
     job.message = "Restarting with new image..."
-    job.preview_image = None
+    job.preview_image_path = None
     job.error = None
+    JobStore.save_job(job)
     
     # Create parameters object
     params = ProcessRequest(
