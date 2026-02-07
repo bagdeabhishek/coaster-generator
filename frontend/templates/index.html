@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Coaster Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            50: '#eff6ff',
+                            100: '#dbeafe',
+                            200: '#bfdbfe',
+                            300: '#93c5fd',
+                            400: '#60a5fa',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            800: '#1e40af',
+                            900: '#1e3a8a',
+                        }
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body class="bg-gradient-to-br from-gray-50 to-gray-100 dark:from-slate-900 dark:to-slate-800 min-h-screen transition-colors duration-300">
+    <!-- Dark mode detection script -->
+    <script>
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    </script>
+
+    <div class="min-h-screen py-6 px-4 sm:py-8 sm:px-6 lg:px-8">
+        <div class="max-w-3xl mx-auto">
+            <!-- Header -->
+            <div class="bg-gradient-to-r from-primary-600 to-purple-600 rounded-2xl shadow-2xl p-6 sm:p-8 mb-6 sm:mb-8 flex justify-between items-center">
+                <div>
+                    <h1 class="text-2xl sm:text-3xl font-bold text-white mb-1">3D Coaster Generator</h1>
+                    <p class="text-primary-100 text-sm sm:text-base">Transform images into 3D printable coasters</p>
+                </div>
+                <button id="darkModeToggle" class="p-2 rounded-lg bg-white/20 hover:bg-white/30 text-white transition-all duration-200" aria-label="Toggle dark mode">
+                    <svg id="sunIcon" class="w-6 h-6 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                    </svg>
+                    <svg id="moonIcon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Main Card -->
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-xl overflow-hidden transition-colors duration-300">
+                <div class="p-6 sm:p-8 space-y-6">
+                    <!-- Upload Section -->
+                    <div id="uploadSection">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Upload Image <span class="text-red-500">*</span>
+                        </label>
+                        <div id="dropZone" class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 sm:p-8 text-center hover:border-primary-500 dark:hover:border-primary-400 transition-all duration-200 cursor-pointer bg-gray-50 dark:bg-slate-700/50">
+                            <input type="file" id="imageInput" name="image" accept="image/*" required class="hidden">
+                            <svg class="mx-auto h-12 w-12 text-gray-400 dark:text-gray-500 mb-4" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                                <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                            <p class="text-gray-600 dark:text-gray-400 text-sm sm:text-base font-medium">Drop your image here or click to browse</p>
+                            <p class="text-gray-400 dark:text-gray-500 text-xs mt-2">Supports: JPG, PNG, WebP</p>
+                            <img id="imagePreview" class="mt-4 max-h-48 mx-auto rounded-lg hidden shadow-md" alt="Preview">
+                        </div>
+                    </div>
+
+                    <!-- BFL API Key (Optional) -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            BFL API Key <span class="text-gray-400 dark:text-gray-500 font-normal">(optional)</span>
+                        </label>
+                        <input type="password" id="apiKey" name="api_key" 
+                            placeholder="Enter your BFL API key or leave blank"
+                            class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200">
+                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            Leave empty to use server key. <a href="https://api.bfl.ai" target="_blank" class="text-primary-600 dark:text-primary-400 hover:underline">Get your own key</a> for usage tracking.
+                        </p>
+                    </div>
+
+                    <!-- Stamp Text -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                            Stamp Text <span class="text-gray-400 dark:text-gray-500 font-normal">(appears on coaster ring)</span>
+                        </label>
+                        <input type="text" id="stampText" name="stamp_text" 
+                            value="Abhishek Does Stuff"
+                            maxlength="50"
+                            class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200">
+                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            This text curves along the top of your coaster stamp (max 50 characters)
+                        </p>
+                    </div>
+
+                    <!-- Parameters Grid -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Diameter (mm)
+                            </label>
+                            <input type="number" id="diameter" name="diameter" value="100" min="50" max="200" step="1"
+                                class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Thickness (mm)
+                            </label>
+                            <input type="number" id="thickness" name="thickness" value="5" min="2" max="20" step="0.5"
+                                class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Logo Depth (mm)
+                            </label>
+                            <input type="number" id="logoDepth" name="logo_depth" value="0.6" min="0.1" max="5" step="0.1"
+                                class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Logo Scale
+                            </label>
+                            <input type="number" id="scale" name="scale" value="0.85" min="0.1" max="1.5" step="0.05"
+                                class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200">
+                            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Relative to coaster diameter</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Top Rotation (°)
+                            </label>
+                            <input type="number" id="topRotate" name="top_rotate" value="0" min="0" max="360" step="1"
+                                class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Bottom Rotation (°)
+                            </label>
+                            <input type="number" id="bottomRotate" name="bottom_rotate" value="0" min="0" max="360" step="1"
+                                class="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-slate-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200">
+                        </div>
+                    </div>
+
+                    <!-- Flip Horizontal -->
+                    <div class="flex items-center">
+                        <input type="checkbox" id="flipHorizontal" name="flip_horizontal" checked 
+                            class="w-5 h-5 text-primary-600 border-gray-300 rounded focus:ring-primary-500 dark:bg-slate-700 dark:border-gray-600">
+                        <label for="flipHorizontal" class="ml-3 text-sm font-medium text-gray-700 dark:text-gray-300 cursor-pointer">
+                            Flip Horizontal (Mirror)
+                        </label>
+                    </div>
+
+                    <!-- Generate Button -->
+                    <button id="generateBtn" class="w-full bg-gradient-to-r from-primary-600 to-purple-600 hover:from-primary-700 hover:to-purple-700 text-white font-semibold py-4 px-6 rounded-xl shadow-lg transform transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">
+                        <span id="generateBtnText">Generate 3D Coaster</span>
+                    </button>
+
+                    <!-- Progress Section -->
+                    <div id="progressSection" class="hidden space-y-4">
+                        <div class="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-6">
+                            <div class="flex justify-between text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                <span id="progressStatus">Initializing...</span>
+                                <span id="progressPercent">0%</span>
+                            </div>
+                            <div class="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-3 overflow-hidden">
+                                <div id="progressBar" class="bg-gradient-to-r from-primary-500 to-purple-500 h-full rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Review Section -->
+                    <div id="reviewSection" class="hidden space-y-4">
+                        <div class="bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-400 dark:border-amber-600 rounded-xl p-6">
+                            <h3 class="text-xl font-bold text-amber-800 dark:text-amber-200 mb-4 text-center">Review Generated Image</h3>
+                            <div class="bg-white dark:bg-slate-800 rounded-lg p-4 shadow-inner">
+                                <img id="reviewImage" class="w-full max-h-96 object-contain rounded-lg" alt="Generated Preview">
+                            </div>
+                            <div class="flex flex-col sm:flex-row gap-3 mt-6">
+                                <button id="approveBtn" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98]">
+                                    Approve & Continue
+                                </button>
+                                <button id="retryBtn" class="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98]">
+                                    Try Again
+                                </button>
+                            </div>
+                            <div id="retryForm" class="hidden mt-4 p-4 bg-white dark:bg-slate-800 rounded-lg border-2 border-dashed border-amber-400 dark:border-amber-600">
+                                <h4 class="font-semibold text-amber-800 dark:text-amber-200 mb-3">Upload Different Image</h4>
+                                <input type="file" id="retryImageInput" accept="image/*" class="w-full mb-3 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-amber-100 file:text-amber-700 hover:file:bg-amber-200 dark:file:bg-amber-900 dark:file:text-amber-200">
+                                <button id="retrySubmitBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-200">
+                                    Submit New Image
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3D Viewer Section -->
+                    <div id="viewerSection" class="hidden space-y-4">
+                        <div class="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-400 dark:border-blue-600 rounded-xl p-6">
+                            <h3 class="text-xl font-bold text-blue-800 dark:text-blue-200 mb-4 text-center">3D Preview</h3>
+                            
+                            <!-- Viewer Controls -->
+                            <div class="flex flex-wrap justify-center gap-2 mb-4">
+                                <button id="viewBodyBtn" class="viewer-btn active px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium transition-all hover:bg-blue-700" data-model="body">View Body</button>
+                                <button id="viewLogosBtn" class="viewer-btn px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium transition-all hover:bg-blue-600" data-model="logos">View Logos</button>
+                                <button id="viewBothBtn" class="viewer-btn px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium transition-all hover:bg-blue-600" data-model="both">View Both</button>
+                                <button id="fullscreenBtn" class="viewer-btn px-4 py-2 bg-gray-600 text-white rounded-lg text-sm font-medium transition-all hover:bg-gray-700">⛶ Fullscreen</button>
+                            </div>
+                            
+                            <!-- 3D Canvas -->
+                            <div id="viewerContainer" class="w-full h-80 sm:h-96 bg-black rounded-lg shadow-inner cursor-move"></div>
+                            
+                            <p class="text-center text-sm text-gray-600 dark:text-gray-400 mt-3">
+                                Click & drag to rotate • Scroll to zoom • Right-click to pan
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Downloads Section -->
+                    <div id="downloadsSection" class="hidden space-y-4">
+                        <div class="bg-green-50 dark:bg-green-900/20 border-2 border-green-400 dark:border-green-600 rounded-xl p-6">
+                            <h3 class="text-xl font-bold text-green-800 dark:text-green-200 mb-4">Download Your Files</h3>
+                            <div class="flex flex-col sm:flex-row gap-3">
+                                <a href="#" id="downloadBody" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg text-center transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                                    Download Body STL
+                                </a>
+                                <a href="#" id="downloadLogos" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg text-center transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                                    Download Logos STL
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Error Section -->
+                    <div id="errorSection" class="hidden space-y-4">
+                        <div class="bg-red-50 dark:bg-red-900/20 border-2 border-red-400 dark:border-red-600 rounded-xl p-6">
+                            <h3 class="text-xl font-bold text-red-800 dark:text-red-200 mb-2">Error</h3>
+                            <p id="errorMessage" class="text-red-700 dark:text-red-300"></p>
+                            <button id="dismissErrorBtn" class="mt-4 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg transition-all duration-200">
+                                Dismiss
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Info Card -->
+                    <div class="bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 dark:border-blue-400 p-4 rounded-r-lg">
+                        <p class="text-sm text-blue-800 dark:text-blue-200">
+                            <strong>How it works:</strong> Upload an image and we'll generate a 3D coaster using AI. You'll review the AI-generated design before we create the 3D model. Both top and bottom of the coaster will have your design.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <p class="text-center text-sm text-gray-500 dark:text-gray-400 mt-6">
+                3D Coaster Generator v1.0 • Built with ❤️
+            </p>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

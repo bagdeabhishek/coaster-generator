@@ -1,0 +1,5 @@
+First, establish the layout: A professional circular stamp emblem defined by two thick, concentric black rings. In the white channel between these rings, curve the text '{{stamp_text}}' in a bold, clean, uppercase sans-serif font along the top arc. Ensure the text is perfectly legible and geometric.
+
+Next, fill the center of this circular frame with the subject rendered exactly as follows: A professional Gestalt negative space logo. The design is a minimalist, high-contrast black and white graphic where the subject's form is defined entirely by solid, heavy black masses representing shadows, and pure white negative space representing highlights. There are no outlines and no fine lines. The visual style uses the principle of closure to suggest the full form, similar to the iconic panda logo style.
+
+Finally, ensure the entire combined image is a clean, flat, bold vector graphic optimized for 3D printing extrusion with no disconnected islands or thin artifacts. Strictly black and white (#000000 and #FFFFFF).
