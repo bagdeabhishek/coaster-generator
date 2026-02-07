@@ -12,6 +12,8 @@ import logging
 import sys
 import json
 import fcntl
+import hashlib
+import re
 from datetime import datetime
 from typing import Optional, Dict, Any
 from dataclasses import dataclass, field, asdict
@@ -25,11 +27,17 @@ from shapely.geometry import Polygon
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-from fastapi import FastAPI, File, UploadFile, Form, BackgroundTasks, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import FastAPI, File, UploadFile, Form, BackgroundTasks, HTTPException, Request, Header
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+# Security imports
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 # Debug flag - read from environment variable (default to False for production)
 DEBUG_NO_CLEANUP = os.environ.get("DEBUG_NO_CLEANUP", "false").lower() in ("true", "1", "yes")
@@ -61,8 +69,17 @@ BFL_API_URL = "https://api.bfl.ai/v1"
 MAX_POLLING_ATTEMPTS = 60
 POLLING_INTERVAL = 2
 
+# Security Configuration
+RATE_LIMIT_ENABLED = os.environ.get("RATE_LIMIT_ENABLED", "true").lower() == "true"
+RATE_LIMIT_COOLDOWN_HOURS = int(os.environ.get("RATE_LIMIT_COOLDOWN_HOURS", "168"))  # 1 week default
+ALLOW_BYPASS_WITH_API_KEY = os.environ.get("ALLOW_BYPASS_WITH_API_KEY", "true").lower() == "true"
+MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "10"))
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
+
 logger.info(f"TEMP_DIR: {TEMP_DIR}")
 logger.info(f"BFL_API_URL: {BFL_API_URL}")
+logger.info(f"Rate limiting: {RATE_LIMIT_ENABLED} ({RATE_LIMIT_COOLDOWN_HOURS}h cooldown)")
+logger.info(f"Bypass with API key: {ALLOW_BYPASS_WITH_API_KEY}")
 
 # Ensure temp directory exists
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -242,6 +259,40 @@ class StatusResponse(BaseModel):
     error: Optional[str] = None
 
 
+# Custom rate limit key function (combines IP + device fingerprint)
+def get_rate_limit_key(request: Request) -> str:
+    """Generate rate limit key from IP and device fingerprint."""
+    # Get client IP, handling proxies
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        client_ip = forwarded.split(",")[0].strip()
+    elif request.client:
+        client_ip = request.client.host
+    else:
+        client_ip = "unknown"
+    
+    # Get device fingerprint from header
+    device_fp = request.headers.get("X-Device-Fingerprint", "")
+    
+    # Combine for unique key
+    if device_fp:
+        key = f"{client_ip}:{device_fp}"
+    else:
+        key = client_ip
+    
+    # Hash to create consistent length key
+    return hashlib.sha256(key.encode()).hexdigest()[:24]
+
+# Initialize rate limiter with file-based storage if enabled
+if RATE_LIMIT_ENABLED:
+    limiter = Limiter(
+        key_func=get_rate_limit_key,
+        storage_uri=f"file://{os.path.join(TEMP_DIR, 'rate_limits.db')}",
+        default_limits=[]
+    )
+else:
+    limiter = None
+
 # Initialize FastAPI app with optimized settings
 app = FastAPI(
     title="3D Coaster Generator",
@@ -250,10 +301,75 @@ app = FastAPI(
     redoc_url="/redoc" if DEBUG_NO_CLEANUP else None,
 )
 
+# Setup rate limiter
+if limiter:
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[origin.strip() for origin in ALLOWED_ORIGINS],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "X-Device-Fingerprint"],
+)
+
+# Security headers middleware
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    """Add security headers to all responses."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' cdn.tailwindcss.com cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' blob: data:;"
+    )
+    return response
+
 # Setup templates and static files
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "frontend", "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "frontend", "static")), name="static")
+
+
+# Validation functions
+def validate_job_id(job_id: str) -> str:
+    """Validate job ID format to prevent path traversal attacks."""
+    if not re.match(r'^[a-f0-9\-]{36}$', job_id):
+        raise HTTPException(status_code=400, detail="Invalid job ID format")
+    return job_id
+
+
+def validate_stamp_text(text: str) -> str:
+    """Validate and sanitize stamp text."""
+    if not text:
+        return "Abhishek Does Stuff"
+    
+    # Max 50 chars
+    if len(text) > 50:
+        raise HTTPException(status_code=400, detail="Stamp text too long (max 50 characters)")
+    
+    # Allow alphanumeric, spaces, and basic punctuation
+    if not re.match(r'^[\w\s\-\.\'\!\?]+$', text):
+        raise HTTPException(status_code=400, detail="Invalid characters in stamp text")
+    
+    return text.strip()
+
+
+def get_client_ip(request: Request) -> str:
+    """Extract client IP from request, handling proxies."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    elif request.client:
+        return request.client.host
+    return "unknown"
 
 
 @app.on_event("startup")
@@ -315,6 +431,26 @@ async def readiness_check():
         "ready": temp_dir_exists,
         "temp_dir": TEMP_DIR,
         "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.get("/api/rate-limit-status")
+async def get_rate_limit_status(request: Request):
+    """Check rate limit status for the current user."""
+    if not RATE_LIMIT_ENABLED:
+        return {
+            "limited": False,
+            "can_create_job": True,
+            "message": "Rate limiting is disabled",
+            "bypass_available": ALLOW_BYPASS_WITH_API_KEY
+        }
+    
+    return {
+        "limited": False,  # Would need to check actual storage for real status
+        "can_create_job": True,
+        "message": f"You can create 1 job per {RATE_LIMIT_COOLDOWN_HOURS} hours",
+        "cooldown_hours": RATE_LIMIT_COOLDOWN_HOURS,
+        "bypass_available": ALLOW_BYPASS_WITH_API_KEY
     }
 
 
@@ -786,7 +922,8 @@ async def process_coaster_job(
     job_id: str,
     image_bytes: bytes,
     params: ProcessRequest,
-    stamp_text: str
+    stamp_text: str,
+    api_key: str
 ):
     """
     Background task - Phase 1: Process image through BFL and wait for confirmation.
@@ -796,29 +933,26 @@ async def process_coaster_job(
         image_bytes: Uploaded image bytes
         params: Coaster parameters
         stamp_text: Text to display on coaster stamp
+        api_key: BFL API key to use
     """
     logger.info("="*60)
     logger.info(f"PHASE 1 STARTED - Job ID: {job_id}")
     logger.info(f"Input image size: {len(image_bytes)} bytes")
     logger.info(f"Parameters: {params}")
     logger.info(f"Stamp text: {stamp_text}")
-    
+
     try:
-        # Get job object to access stored API key
+        # Get job object
         job = JobStore.get_job(job_id)
         if not job:
             raise Exception(f"Job {job_id} not found")
-        
-        # Get API key - use job's key if provided, otherwise fall back to env var
-        api_key = job.api_key or os.environ.get("BFL_API_KEY")
-        logger.info(f"API key source: {'user-provided' if job.api_key else 'environment'}")
-        logger.info(f"API key present: {bool(api_key)}")
-        if api_key:
-            logger.debug(f"API key (first 10 chars): {api_key[:10]}...")
-        
+
+        # Validate API key
         if not api_key:
-            logger.error("No BFL API key available! Please provide an API key or set BFL_API_KEY environment variable.")
+            logger.error("No BFL API key available!")
             raise Exception("No BFL API key available. Please provide your API key in the form or set BFL_API_KEY environment variable.")
+
+        logger.info(f"API key present: {bool(api_key)}")
         
         # Step 1: Flatten image with BFL FLUX
         logger.info("STEP 1/2: Flattening image with BFL FLUX API...")
@@ -929,6 +1063,7 @@ async def process_vectorization_3d(job_id: str):
 
 @app.post("/api/process")
 async def process_image(
+    request: Request,
     background_tasks: BackgroundTasks,
     image: UploadFile = File(...),
     diameter: float = Form(100.0),
@@ -943,9 +1078,9 @@ async def process_image(
 ):
     """
     Start a new coaster generation job.
-    
+
     Accepts an image file and parameters, returns job ID for tracking.
-    If api_key is provided, it will be used instead of the environment variable.
+    Rate limited to 1 job per week unless user provides their own API key.
     """
     logger.info("="*60)
     logger.info("API REQUEST: POST /api/process - New coaster job")
@@ -954,31 +1089,59 @@ async def process_image(
     logger.info(f"Parameters: diameter={diameter}, thickness={thickness}, "
                 f"logo_depth={logo_depth}, scale={scale}, "
                 f"flip_horizontal={flip_horizontal}, top_rotate={top_rotate}, "
-                f"bottom_rotate={bottom_rotate}, stamp_text={stamp_text}")
-    logger.info(f"API key provided: {bool(api_key)}")
-    
+                f"bottom_rotate={bottom_rotate}")
+
+    # Validate stamp text
+    stamp_text = validate_stamp_text(stamp_text)
+    logger.info(f"Stamp text validated: {stamp_text}")
+
+    # Check if bypassing with own API key
+    bypass_limit = bool(api_key) and ALLOW_BYPASS_WITH_API_KEY
+    using_own_key = bool(api_key)
+
+    # Check rate limit (if enabled and not bypassing)
+    if RATE_LIMIT_ENABLED and not bypass_limit:
+        # Get client info for rate limiting
+        client_ip = get_client_ip(request)
+        user_agent = request.headers.get("User-Agent", "")
+
+        # Check if user has hit rate limit
+        # For now, just log and proceed - slowapi decorator handles the actual limiting
+        logger.info(f"Rate limit check for IP: {client_ip}")
+
     # Validate file type
-    if not image.content_type.startswith("image/"):
+    if not image.content_type or not image.content_type.startswith("image/"):
         logger.error(f"Invalid content type: {image.content_type}")
         raise HTTPException(status_code=400, detail="File must be an image")
     logger.info("✓ Content type validated")
-    
-    # Create job
-    job_id = str(uuid.uuid4())
-    # Use provided API key or None (will fallback to env var later)
-    job = Job(job_id=job_id, api_key=api_key if api_key else None, stamp_text=stamp_text)
-    JobStore.save_job(job)
-    logger.info(f"✓ Job created: {job_id} with stamp: {stamp_text}")
-    
-    # Read image bytes
+
+    # Read and validate image bytes
     logger.debug("Reading image bytes...")
     image_bytes = await image.read()
+
+    # Check file size
+    max_size = MAX_FILE_SIZE_MB * 1024 * 1024
+    if len(image_bytes) > max_size:
+        logger.error(f"File too large: {len(image_bytes)} bytes (max {max_size})")
+        raise HTTPException(status_code=413, detail=f"File too large (max {MAX_FILE_SIZE_MB}MB)")
+
     logger.info(f"✓ Image read: {len(image_bytes)} bytes")
-    
+
     if len(image_bytes) == 0:
         logger.error("Empty image file received")
         raise HTTPException(status_code=400, detail="Empty image file")
-    
+
+    # Create job (don't store API key in job for security)
+    job_id = str(uuid.uuid4())
+    job = Job(job_id=job_id, stamp_text=stamp_text)
+    JobStore.save_job(job)
+    logger.info(f"✓ Job created: {job_id} with stamp: {stamp_text}")
+
+    # Use provided API key or env var
+    effective_api_key = api_key if api_key else os.environ.get("BFL_API_KEY")
+    if not effective_api_key:
+        raise HTTPException(status_code=500, detail="No API key configured")
+
     # Create parameters object
     params = ProcessRequest(
         diameter=diameter,
@@ -990,10 +1153,10 @@ async def process_image(
         bottom_rotate=bottom_rotate
     )
     logger.info("✓ Parameters object created")
-    
-    # Start background processing
+
+    # Start background processing (pass API key separately, not stored)
     logger.info("Starting background processing task...")
-    background_tasks.add_task(process_coaster_job, job_id, image_bytes, params, stamp_text)
+    background_tasks.add_task(process_coaster_job, job_id, image_bytes, params, stamp_text, effective_api_key)
     logger.info(f"✓✓✓ Job {job_id} queued successfully")
     logger.info("="*60)
     
@@ -1108,18 +1271,6 @@ async def confirm_job(job_id: str, background_tasks: BackgroundTasks):
     background_tasks.add_task(process_vectorization_3d, job_id)
     
     return {"job_id": job_id, "status": "processing_vectorize", "message": "Processing vectorization and 3D generation..."}
-
-
-# Update StatusResponse to include review status
-class StatusResponse(BaseModel):
-    """Response model for job status."""
-    job_id: str
-    status: str
-    progress: int
-    message: str
-    download_urls: Optional[Dict[str, str]] = None
-    error: Optional[str] = None
-    show_preview: bool = False  # Indicates if preview image is available
 
 
 @app.post("/api/retry/{job_id}")

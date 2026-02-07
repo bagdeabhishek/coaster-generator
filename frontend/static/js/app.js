@@ -3,6 +3,39 @@
  * Handles form submission, Three.js viewer, and API communication
  */
 
+// Generate device fingerprint for rate limiting
+function generateDeviceFingerprint() {
+    const components = [
+        navigator.userAgent,
+        screen.width + 'x' + screen.height,
+        screen.colorDepth,
+        navigator.language,
+        new Date().getTimezoneOffset(),
+        !!window.sessionStorage,
+        !!window.localStorage
+    ];
+    
+    // Simple hash function
+    let hash = 0;
+    const str = components.join('|');
+    for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
+    }
+    return Math.abs(hash).toString(16);
+}
+
+// Get or create device fingerprint
+function getDeviceFingerprint() {
+    let fp = localStorage.getItem('deviceFingerprint');
+    if (!fp) {
+        fp = generateDeviceFingerprint();
+        localStorage.setItem('deviceFingerprint', fp);
+    }
+    return fp;
+}
+
 // Global state
 let pollingInterval = null;
 let currentJobId = null;
@@ -191,12 +224,20 @@ async function handleSubmit() {
     try {
         const response = await fetch('/api/process', {
             method: 'POST',
+            headers: {
+                'X-Device-Fingerprint': getDeviceFingerprint()
+            },
             body: formData
         });
         
         if (!response.ok) {
             const error = await response.json();
-            throw new Error(error.detail || 'Failed to start processing');
+            // Handle rate limit errors specially
+            if (response.status === 429) {
+                const hours = Math.ceil(error.retry_after / 3600);
+                throw new Error(`${error.message}\n\nYou can bypass this limit by using your own BFL API key.`);
+            }
+            throw new Error(error.detail || error.message || 'Failed to start processing');
         }
         
         const data = await response.json();
