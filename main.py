@@ -802,9 +802,9 @@ def generate_3d_coaster(
     svg_string: str,
     params: ProcessRequest,
     job_id: str
-) -> tuple:
+) -> tuple[str, str, str]:
     """
-    Generate 3D coaster STL files from SVG.
+    Generate 3D coaster files from SVG.
     
     Args:
         svg_string: SVG content as string
@@ -812,7 +812,7 @@ def generate_3d_coaster(
         job_id: Job identifier
     
     Returns:
-        Tuple of (body_stl_path, logos_stl_path)
+        Tuple of (3mf_path, body_stl_path, logos_stl_path)
     """
     logger.info("="*60)
     logger.info("GENERATE 3D COASTER - Starting 3D generation")
@@ -827,10 +827,9 @@ def generate_3d_coaster(
     base_name = f"{job_id}_{timestamp}"
     logger.info(f"Base filename: {base_name}")
     
-    # Define output paths
-    body_stl_path = os.path.join(TEMP_DIR, f"{base_name}_Body.stl")
-    logos_stl_path = os.path.join(TEMP_DIR, f"{base_name}_Logos.stl")
-    logger.debug(f"Output paths: Body={body_stl_path}, Logos={logos_stl_path}")
+    # Define output path for 3MF
+    output_3mf_path = os.path.join(TEMP_DIR, f"{base_name}_coaster.3mf")
+    logger.debug(f"Output path: {output_3mf_path}")
     
     # Create base cylinder
     logger.debug(f"Creating base cylinder: radius={params.diameter/2}, height={params.thickness}")
@@ -968,18 +967,34 @@ def generate_3d_coaster(
     final_logos = trimesh.util.concatenate([top_logo, bottom_logo])
     logger.info(f"Final combined logos: {len(final_logos.vertices)} vertices")
     
-    # Export STL files
-    logger.info(f"Exporting STL files...")
-    logger.debug(f"Body STL: {body_stl_path}")
-    logger.debug(f"Logos STL: {logos_stl_path}")
+    # Export both 3MF (for download) and STLs (for viewer)
+    logger.info(f"Exporting 3MF file and STL files...")
     
+    # Define STL paths (for viewer)
+    body_stl_path = os.path.join(TEMP_DIR, f"{base_name}_Body.stl")
+    logos_stl_path = os.path.join(TEMP_DIR, f"{base_name}_Logos.stl")
+    
+    # Export STLs for viewer
     base.export(body_stl_path)
-    body_size = os.path.getsize(body_stl_path)
-    logger.info(f"Body STL exported: {body_size} bytes ({body_size/1024:.1f} KB)")
-    
     final_logos.export(logos_stl_path)
-    logos_size = os.path.getsize(logos_stl_path)
-    logger.info(f"Logos STL exported: {logos_size} bytes ({logos_size/1024:.1f} KB)")
+    logger.debug(f"STL files exported for viewer")
+    
+    # Export 3MF with colors for download
+    logger.debug(f"Output 3MF: {output_3mf_path}")
+    
+    # Create scene and export as 3MF
+    # Note: Trimesh will handle colors/materials automatically
+    scene = trimesh.Scene()
+    scene.add_geometry(base, node_name='coaster_body')
+    scene.add_geometry(final_logos, node_name='coaster_logos')
+    
+    try:
+        scene.export(output_3mf_path, file_type='3mf')
+        file_size = os.path.getsize(output_3mf_path)
+        logger.info(f"3MF exported: {file_size} bytes ({file_size/1024:.1f} KB)")
+    except Exception as e:
+        logger.error(f"Failed to export 3MF: {e}")
+        raise Exception(f"Failed to export 3MF: {str(e)}")
     
     # Save SVG for debugging
     if DEBUG_NO_CLEANUP:
@@ -990,9 +1005,10 @@ def generate_3d_coaster(
     
     logger.info("="*60)
     logger.info("3D COASTER GENERATION COMPLETE")
-    logger.info(f"Files: Body={body_stl_path}, Logos={logos_stl_path}")
-    
-    return body_stl_path, logos_stl_path
+    logger.info(f"Files: 3MF={output_3mf_path}, Body={body_stl_path}, Logos={logos_stl_path}")
+
+    # Return all three paths - 3MF for download, STLs for viewer
+    return output_3mf_path, body_stl_path, logos_stl_path
 
 
 async def process_coaster_job(
@@ -1102,16 +1118,18 @@ async def process_vectorization_3d(job_id: str):
         logger.info("STEP 2/2: Generating 3D model...")
         await update_job_status(job_id, "processing_3d", 90, "Generating 3D model...")
         logger.info("Calling generate_3d_coaster...")
-        body_path, logos_path = generate_3d_coaster(svg_string, params, job_id)
+        coaster_3mf_path, body_stl_path, logos_stl_path = generate_3d_coaster(svg_string, params, job_id)
         logger.info(f"✓ 3D generation complete")
-        logger.info(f"  - Body STL: {body_path}")
-        logger.info(f"  - Logos STL: {logos_path}")
+        logger.info(f"  - 3MF: {coaster_3mf_path}")
+        logger.info(f"  - Body STL: {body_stl_path}")
+        logger.info(f"  - Logos STL: {logos_stl_path}")
         
         # Update job with file paths
         logger.info("Updating job status to completed...")
         job.files = {
-            "body": body_path,
-            "logos": logos_path
+            "combined_3mf": coaster_3mf_path,
+            "body": body_stl_path,
+            "logos": logos_stl_path
         }
         job.status = "completed"
         job.progress = 100
@@ -1275,27 +1293,49 @@ async def get_status(job_id: str):
     # Add download URLs if completed
     if job.status == "completed" and job.files:
         response.download_urls = {
+            "combined": f"/api/download/{job_id}",
             "body": f"/api/download/{job_id}/body",
             "logos": f"/api/download/{job_id}/logos"
         }
-    
+
     return response
 
 
-@app.get("/api/download/{job_id}/body")
-async def download_body(job_id: str):
-    """Download the coaster body STL file."""
+@app.get("/api/download/{job_id}")
+async def download_coaster(job_id: str):
+    """Download the combined coaster 3MF file."""
     job = JobStore.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
+
+    if job.status != "completed" or "combined_3mf" not in job.files:
+        raise HTTPException(status_code=400, detail="Coaster file not available")
+
+    file_path = job.files["combined_3mf"]
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    return FileResponse(
+        file_path,
+        media_type="application/vnd.ms-package.3dmanufacturing-3dmodel+xml",
+        filename=f"coaster_{job_id}.3mf"
+    )
+
+
+@app.get("/api/download/{job_id}/body")
+async def download_body_stl(job_id: str):
+    """Download the coaster body STL file (for viewer)."""
+    job = JobStore.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
     if job.status != "completed" or "body" not in job.files:
         raise HTTPException(status_code=400, detail="Body file not available")
-    
+
     file_path = job.files["body"]
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found on disk")
-    
+
     return FileResponse(
         file_path,
         media_type="application/octet-stream",
@@ -1304,19 +1344,19 @@ async def download_body(job_id: str):
 
 
 @app.get("/api/download/{job_id}/logos")
-async def download_logos(job_id: str):
-    """Download the coaster logos STL file."""
+async def download_logos_stl(job_id: str):
+    """Download the coaster logos STL file (for viewer)."""
     job = JobStore.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
+
     if job.status != "completed" or "logos" not in job.files:
         raise HTTPException(status_code=400, detail="Logos file not available")
-    
+
     file_path = job.files["logos"]
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found on disk")
-    
+
     return FileResponse(
         file_path,
         media_type="application/octet-stream",

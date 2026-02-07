@@ -98,8 +98,7 @@ const elements = {
     viewBothBtn: document.getElementById('viewBothBtn'),
     
     // Downloads
-    downloadBody: document.getElementById('downloadBody'),
-    downloadLogos: document.getElementById('downloadLogos'),
+    downloadCoaster: document.getElementById('downloadCoaster'),
 };
 
 // ============================================
@@ -576,19 +575,18 @@ async function show3DViewer(urls) {
     elements.viewerSection.classList.add('animate-fade-in');
     elements.downloadsSection.classList.remove('hidden');
     elements.downloadsSection.classList.add('animate-fade-in');
-    
-    // Update download links
-    elements.downloadBody.href = urls.body;
-    elements.downloadLogos.href = urls.logos;
-    
+
+    // Update download link (3MF file)
+    elements.downloadCoaster.href = urls.combined;
+
     // Initialize viewer if not already done
     // Wait for the DOM to update so the container has proper dimensions
     if (!renderer) {
         await new Promise(resolve => setTimeout(resolve, 100));
         init3DViewer();
     }
-    
-    // Load both models by default
+
+    // Load both models by default (using internal STL URLs for viewer)
     await loadBothModels();
 }
 
