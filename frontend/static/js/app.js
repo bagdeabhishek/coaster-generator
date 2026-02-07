@@ -439,14 +439,25 @@ function init3DViewer() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
     
+    // Get container dimensions (fallback to default if not available)
+    let width = elements.viewerContainer.clientWidth;
+    let height = elements.viewerContainer.clientHeight;
+    
+    // If dimensions are 0, set default size
+    if (width === 0 || height === 0) {
+        width = 800;
+        height = 600;
+        console.warn('Viewer container has no dimensions, using default size:', width, 'x', height);
+    }
+    
     // Camera
-    const aspect = elements.viewerContainer.clientWidth / elements.viewerContainer.clientHeight;
+    const aspect = width / height;
     camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
     camera.position.set(0, 0, 150);
     
     // Renderer
     renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(elements.viewerContainer.clientWidth, elements.viewerContainer.clientHeight);
+    renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     elements.viewerContainer.appendChild(renderer.domElement);
     
@@ -564,7 +575,9 @@ async function show3DViewer(urls) {
     elements.downloadLogos.href = urls.logos;
     
     // Initialize viewer if not already done
+    // Wait for the DOM to update so the container has proper dimensions
     if (!renderer) {
+        await new Promise(resolve => setTimeout(resolve, 100));
         init3DViewer();
     }
     
