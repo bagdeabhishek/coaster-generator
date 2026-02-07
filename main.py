@@ -986,24 +986,104 @@ def generate_3d_coaster(
     final_logos.export(logos_stl_path)
     logger.debug(f"STL files exported for viewer")
     
-    # Export 3MF with colors for download
+    # Export 3MF with proper build section for slicer compatibility
     logger.debug(f"Output 3MF: {output_3mf_path}")
     
-    # Create scene and export as 3MF
-    # Note: Trimesh will handle colors/materials automatically
-    scene = trimesh.Scene()
-    scene.add_geometry(base, node_name='coaster_body')
-    scene.add_geometry(final_logos, node_name='coaster_logos')
-    
-    logger.debug(f"Scene geometry count: {len(scene.geometry)}")
-    
     try:
+        # Export using trimesh's exchange module with proper 3MF formatting
+        import trimesh.exchange.threemf as threemf
+        
+        # Create scene with explicit transforms (identity transforms at origin)
+        scene = trimesh.Scene()
+        
+        # Add body at origin
+        base_transform = trimesh.transformations.identity_matrix()
+        scene.add_geometry(base, node_name='coaster_body', transform=base_transform)
+        
+        # Add logos at origin (they're already positioned correctly in the mesh)
+        logos_transform = trimesh.transformations.identity_matrix()
+        scene.add_geometry(final_logos, node_name='coaster_logos', transform=logos_transform)
+        
+        logger.debug(f"Scene geometry count: {len(scene.geometry)}")
+        logger.debug(f"Scene graph nodes: {list(scene.graph.nodes)}")
+        
+        # Export to 3MF using trimesh's built-in exporter
+        # This should include the build section automatically
         scene.export(output_3mf_path, file_type='3mf')
+        
+        # If the file is missing build section, add it manually
+        _fix_3mf_build_section(output_3mf_path)
+        
         file_size = os.path.getsize(output_3mf_path)
         logger.info(f"3MF exported: {file_size} bytes ({file_size/1024:.1f} KB)")
+        
     except Exception as e:
         logger.error(f"Failed to export 3MF: {e}")
         raise Exception(f"Failed to export 3MF: {str(e)}")
+
+
+def _fix_3mf_build_section(file_path: str):
+    """
+    Fix 3MF file to include proper build section for slicer compatibility.
+    Some slicers (OrcaSlicer, PrusaSlicer) require a build section to display objects.
+    """
+    import zipfile
+    import io
+    import xml.etree.ElementTree as ET
+    
+    try:
+        # Read the existing 3MF
+        with zipfile.ZipFile(file_path, 'r') as zf_in:
+            model_content = zf_in.read('3D/3dmodel.model').decode('utf-8')
+            
+            # Parse XML
+            root = ET.fromstring(model_content)
+            
+            # Define namespace
+            ns = {'': 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02'}
+            
+            # Check if build section exists
+            build = root.find('.//{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}build')
+            
+            if build is None:
+                logger.debug("Adding build section to 3MF file")
+                
+                # Create build section
+                build = ET.SubElement(root, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}build')
+                
+                # Find all object IDs and add them to build
+                resources = root.find('.//{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}resources')
+                if resources is not None:
+                    for obj in resources.findall('.//{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}object'):
+                        obj_id = obj.get('id')
+                        if obj_id:
+                            item = ET.SubElement(build, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}item')
+                            item.set('objectid', obj_id)
+                            # Identity transform (no translation/rotation)
+                            item.set('transform', '1 0 0 0 1 0 0 0 1 0 0 0')
+                
+                # Write back to 3MF
+                new_model = ET.tostring(root, encoding='utf-8', xml_declaration=True)
+                
+                # Create new 3MF with fixed content
+                with zipfile.ZipFile(file_path + '.tmp', 'w', zipfile.ZIP_DEFLATED) as zf_out:
+                    # Copy all files except 3dmodel.model
+                    for item in zf_in.namelist():
+                        if item != '3D/3dmodel.model':
+                            zf_out.writestr(item, zf_in.read(item))
+                    
+                    # Write fixed model
+                    zf_out.writestr('3D/3dmodel.model', new_model)
+                
+                # Replace original with fixed version
+                os.replace(file_path + '.tmp', file_path)
+                logger.debug("3MF build section added successfully")
+            else:
+                logger.debug("3MF already has build section")
+                
+    except Exception as e:
+        logger.warning(f"Could not fix 3MF build section: {e}")
+        # Don't raise - the file might still work for some slicers
     
     # Save SVG for debugging
     if DEBUG_NO_CLEANUP:
