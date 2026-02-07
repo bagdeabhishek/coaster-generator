@@ -1021,6 +1021,20 @@ def generate_3d_coaster(
         logger.error(f"Failed to export 3MF: {e}")
         raise Exception(f"Failed to export 3MF: {str(e)}")
 
+    # Save SVG for debugging
+    if DEBUG_NO_CLEANUP:
+        debug_svg_path = os.path.join(TEMP_DIR, f"{base_name}_debug.svg")
+        with open(debug_svg_path, 'w', encoding='utf-8') as f:
+            f.write(svg_string)
+        logger.info(f"Debug SVG saved: {debug_svg_path}")
+
+    logger.info("="*60)
+    logger.info("3D COASTER GENERATION COMPLETE")
+    logger.info(f"Files: 3MF={output_3mf_path}, Body={body_stl_path}, Logos={logos_stl_path}")
+
+    # Return all three paths - 3MF for download, STLs for viewer
+    return output_3mf_path, body_stl_path, logos_stl_path
+
 
 def _fix_3mf_build_section(file_path: str):
     """
@@ -1028,7 +1042,6 @@ def _fix_3mf_build_section(file_path: str):
     Some slicers (OrcaSlicer, PrusaSlicer) require a build section to display objects.
     """
     import zipfile
-    import io
     import xml.etree.ElementTree as ET
     
     try:
@@ -1084,20 +1097,6 @@ def _fix_3mf_build_section(file_path: str):
     except Exception as e:
         logger.warning(f"Could not fix 3MF build section: {e}")
         # Don't raise - the file might still work for some slicers
-    
-    # Save SVG for debugging
-    if DEBUG_NO_CLEANUP:
-        debug_svg_path = os.path.join(TEMP_DIR, f"{base_name}_debug.svg")
-        with open(debug_svg_path, 'w', encoding='utf-8') as f:
-            f.write(svg_string)
-        logger.info(f"Debug SVG saved: {debug_svg_path}")
-    
-    logger.info("="*60)
-    logger.info("3D COASTER GENERATION COMPLETE")
-    logger.info(f"Files: 3MF={output_3mf_path}, Body={body_stl_path}, Logos={logos_stl_path}")
-
-    # Return all three paths - 3MF for download, STLs for viewer
-    return output_3mf_path, body_stl_path, logos_stl_path
 
 
 async def process_coaster_job(
