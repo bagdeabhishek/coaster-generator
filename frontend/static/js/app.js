@@ -231,13 +231,15 @@ async function handleSubmit() {
         });
         
         if (!response.ok) {
-            const error = await response.json();
+            const errorData = await response.json();
             // Handle rate limit errors specially
             if (response.status === 429) {
-                const hours = Math.ceil(error.retry_after / 3600);
-                throw new Error(`${error.message}\n\nYou can bypass this limit by using your own BFL API key.`);
+                const error = errorData.detail || errorData;
+                const hours = Math.ceil((error.retry_after || 0) / 3600);
+                const message = error.message || 'Rate limit exceeded';
+                throw new Error(`${message}\n\nYou can bypass this limit by using your own BFL API key.`);
             }
-            throw new Error(error.detail || error.message || 'Failed to start processing');
+            throw new Error(errorData.detail || errorData.message || 'Failed to start processing');
         }
         
         const data = await response.json();

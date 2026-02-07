@@ -14,6 +14,7 @@ import json
 import fcntl
 import hashlib
 import re
+import time
 from datetime import datetime
 from typing import Optional, Dict, Any
 from dataclasses import dataclass, field, asdict
@@ -238,6 +239,83 @@ class JobStore:
 jobs = JobStore()  # This provides a dict-like interface
 
 
+class FileBasedRateLimiter:
+    """File-based rate limiter that persists across restarts."""
+    
+    def __init__(self, storage_path: str, cooldown_hours: int = 168):
+        self.storage_path = storage_path
+        self.cooldown_hours = cooldown_hours
+        self.lock = asyncio.Lock()
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(storage_path), exist_ok=True)
+    
+    async def is_allowed(self, fingerprint: str) -> tuple[bool, str, int]:
+        """
+        Check if user is allowed to make a request.
+        Returns: (allowed: bool, message: str, retry_after_seconds: int)
+        """
+        async with self.lock:
+            # Load existing data
+            data = await self._load_data()
+            
+            now = time.time()
+            cooldown_seconds = self.cooldown_hours * 3600
+            
+            if fingerprint in data:
+                last_request = data[fingerprint]
+                time_since = now - last_request
+                
+                if time_since < cooldown_seconds:
+                    retry_after = int(cooldown_seconds - time_since)
+                    hours_left = retry_after / 3600
+                    return (
+                        False,
+                        f"You've already created a coaster! Come back in {hours_left:.1f} hours.",
+                        retry_after
+                    )
+            
+            # Record this request
+            data[fingerprint] = now
+            await self._save_data(data)
+            
+            return True, "OK", 0
+    
+    async def _load_data(self) -> dict:
+        """Load rate limit data from file."""
+        if not os.path.exists(self.storage_path):
+            return {}
+        
+        try:
+            with open(self.storage_path, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            logger.error(f"Failed to load rate limit data: {e}")
+            return {}
+    
+    async def _save_data(self, data: dict):
+        """Save rate limit data to file."""
+        try:
+            with open(self.storage_path, 'w') as f:
+                json.dump(data, f)
+        except IOError as e:
+            logger.error(f"Failed to save rate limit data: {e}")
+    
+    async def cleanup_old(self):
+        """Remove entries older than cooldown period."""
+        async with self.lock:
+            data = await self._load_data()
+            now = time.time()
+            cutoff = now - (self.cooldown_hours * 3600)
+            
+            # Filter out old entries
+            data = {k: v for k, v in data.items() if v > cutoff}
+            await self._save_data(data)
+            
+            removed = len([k for k, v in data.items() if v <= cutoff])
+            if removed > 0:
+                logger.info(f"Cleaned up {removed} old rate limit entries")
+
+
 class ProcessRequest(BaseModel):
     """Request model for coaster generation."""
     diameter: float = 100.0
@@ -283,16 +361,14 @@ def get_rate_limit_key(request: Request) -> str:
     # Hash to create consistent length key
     return hashlib.sha256(key.encode()).hexdigest()[:24]
 
-# Initialize rate limiter with memory storage
-# Note: Rate limits reset on server restart. For persistence, use Redis instead.
+# Initialize file-based rate limiter (persists across restarts)
+rate_limiter = None
 if RATE_LIMIT_ENABLED:
-    limiter = Limiter(
-        key_func=get_rate_limit_key,
-        storage_uri="memory://",  # In-memory storage (resets on restart)
-        default_limits=[]
+    rate_limiter = FileBasedRateLimiter(
+        storage_path=os.path.join(TEMP_DIR, "rate_limits.json"),
+        cooldown_hours=RATE_LIMIT_COOLDOWN_HOURS
     )
-else:
-    limiter = None
+    logger.info(f"Rate limiter initialized with {RATE_LIMIT_COOLDOWN_HOURS}h cooldown")
 
 # Initialize FastAPI app with optimized settings
 app = FastAPI(
@@ -301,11 +377,6 @@ app = FastAPI(
     docs_url="/docs" if DEBUG_NO_CLEANUP else None,
     redoc_url="/redoc" if DEBUG_NO_CLEANUP else None,
 )
-
-# Setup rate limiter
-if limiter:
-    app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Add CORS middleware
 app.add_middleware(
@@ -398,6 +469,11 @@ async def async_cleanup_old_jobs(lock_file: str, max_age_hours: int = 24):
     try:
         await asyncio.sleep(5)  # Wait 5 seconds after startup to let things settle
         JobStore.cleanup_old_jobs(max_age_hours)
+        
+        # Also cleanup old rate limit entries if rate limiter exists
+        if rate_limiter:
+            await rate_limiter.cleanup_old()
+            logger.info("Rate limit cleanup completed")
     finally:
         # Remove lock file when done
         try:
@@ -1101,14 +1177,31 @@ async def process_image(
     using_own_key = bool(api_key)
 
     # Check rate limit (if enabled and not bypassing)
-    if RATE_LIMIT_ENABLED and not bypass_limit:
+    if RATE_LIMIT_ENABLED and not bypass_limit and rate_limiter:
         # Get client info for rate limiting
         client_ip = get_client_ip(request)
         user_agent = request.headers.get("User-Agent", "")
-
-        # Check if user has hit rate limit
-        # For now, just log and proceed - slowapi decorator handles the actual limiting
-        logger.info(f"Rate limit check for IP: {client_ip}")
+        device_fp = request.headers.get("X-Device-Fingerprint", "")
+        
+        # Create fingerprint
+        fingerprint = get_rate_limit_key(request)
+        
+        # Check if user is allowed
+        allowed, message, retry_after = await rate_limiter.is_allowed(fingerprint)
+        
+        if not allowed:
+            logger.warning(f"Rate limit hit for fingerprint: {fingerprint[:16]}...")
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "rate_limited",
+                    "message": message,
+                    "retry_after": retry_after,
+                    "bypass_available": ALLOW_BYPASS_WITH_API_KEY
+                }
+            )
+        
+        logger.info(f"Rate limit check passed for fingerprint: {fingerprint[:16]}...")
 
     # Validate file type
     if not image.content_type or not image.content_type.startswith("image/"):
