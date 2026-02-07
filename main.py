@@ -1040,59 +1040,66 @@ def _fix_3mf_build_section(file_path: str):
     """
     Fix 3MF file to include proper build section for slicer compatibility.
     Some slicers (OrcaSlicer, PrusaSlicer) require a build section to display objects.
+    Uses string manipulation to avoid XML namespace issues.
     """
     import zipfile
-    import xml.etree.ElementTree as ET
+    import re
     
     try:
         # Read the existing 3MF
         with zipfile.ZipFile(file_path, 'r') as zf_in:
             model_content = zf_in.read('3D/3dmodel.model').decode('utf-8')
             
-            # Parse XML
-            root = ET.fromstring(model_content)
+            # Check if build section already exists (look for properly formatted one)
+            if '\t<build>' in model_content or '  <build>' in model_content:
+                logger.debug("3MF already has properly formatted build section")
+                return
             
-            # Define namespace
-            ns = {'': 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02'}
+            # Check if there's a malformed build section (single line with namespaces)
+            if '<build>' in model_content:
+                logger.debug("Removing malformed build section and replacing")
+                # Remove malformed build section (everything from <build> to </build>)
+                model_content = re.sub(r'<build>.*?</build>', '', model_content, flags=re.DOTALL)
             
-            # Check if build section exists
-            build = root.find('.//{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}build')
+            logger.debug("Adding build section to 3MF file")
             
-            if build is None:
-                logger.debug("Adding build section to 3MF file")
-                
-                # Create build section
-                build = ET.SubElement(root, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}build')
-                
-                # Find all object IDs and add them to build
-                resources = root.find('.//{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}resources')
-                if resources is not None:
-                    for obj in resources.findall('.//{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}object'):
-                        obj_id = obj.get('id')
-                        if obj_id:
-                            item = ET.SubElement(build, '{http://schemas.microsoft.com/3dmanufacturing/core/2015/02}item')
-                            item.set('objectid', obj_id)
-                            # Identity transform (no translation/rotation)
-                            item.set('transform', '1 0 0 0 1 0 0 0 1 0 0 0')
-                
-                # Write back to 3MF
-                new_model = ET.tostring(root, encoding='utf-8', xml_declaration=True)
-                
-                # Create new 3MF with fixed content
-                with zipfile.ZipFile(file_path + '.tmp', 'w', zipfile.ZIP_DEFLATED) as zf_out:
-                    # Copy all files except 3dmodel.model
-                    for item in zf_in.namelist():
-                        if item != '3D/3dmodel.model':
-                            zf_out.writestr(item, zf_in.read(item))
-                    
-                    # Write fixed model
-                    zf_out.writestr('3D/3dmodel.model', new_model)
-                
-                # Replace original with fixed version
-                os.replace(file_path + '.tmp', file_path)
-                logger.debug("3MF build section added successfully")
+            # Find all object IDs using regex
+            object_ids = re.findall(r'<object[^>]+id="(\d+)"', model_content)
+            
+            if not object_ids:
+                logger.warning("No objects found in 3MF to add to build section")
+                return
+            
+            # Create build section with proper format
+            build_items = []
+            for obj_id in object_ids:
+                # Generate a UUID for each item
+                import uuid
+                item_uuid = str(uuid.uuid4())
+                build_items.append(f'  <item objectid="{obj_id}" p:UUID="{item_uuid}"/>')
+            
+            build_section = '  <build>\n' + '\n'.join(build_items) + '\n  </build>'
+            
+            # Insert build section before closing </model> tag
+            if '</model>' in model_content:
+                new_content = model_content.replace('</model>', build_section + '\n</model>')
             else:
-                logger.debug("3MF already has build section")
+                logger.warning("Could not find </model> closing tag")
+                return
+            
+            # Create new 3MF with fixed content
+            with zipfile.ZipFile(file_path + '.tmp', 'w', zipfile.ZIP_DEFLATED) as zf_out:
+                # Copy all files except 3dmodel.model
+                for item in zf_in.namelist():
+                    if item != '3D/3dmodel.model':
+                        zf_out.writestr(item, zf_in.read(item))
+                
+                # Write fixed model
+                zf_out.writestr('3D/3dmodel.model', new_content.encode('utf-8'))
+            
+            # Replace original with fixed version
+            os.replace(file_path + '.tmp', file_path)
+            logger.debug(f"3MF build section added successfully with {len(object_ids)} items")
                 
     except Exception as e:
         logger.warning(f"Could not fix 3MF build section: {e}")
