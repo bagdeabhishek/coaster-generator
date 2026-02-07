@@ -461,12 +461,17 @@ function init3DViewer() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     elements.viewerContainer.appendChild(renderer.domElement);
     
-    // Controls
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.enableZoom = true;
-    controls.enablePan = true;
+    // Controls - check if OrbitControls loaded
+    if (typeof THREE.OrbitControls === 'function') {
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.enableZoom = true;
+        controls.enablePan = true;
+    } else {
+        console.warn('OrbitControls not loaded - viewer will work without mouse controls');
+        controls = null;
+    }
     
     // Lights
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
