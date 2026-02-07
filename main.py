@@ -974,6 +974,13 @@ def generate_3d_coaster(
     body_stl_path = os.path.join(TEMP_DIR, f"{base_name}_Body.stl")
     logos_stl_path = os.path.join(TEMP_DIR, f"{base_name}_Logos.stl")
     
+    # Validate meshes before export
+    logger.info(f"Body mesh: {len(base.vertices)} vertices, {len(base.faces)} faces")
+    logger.info(f"Logos mesh: {len(final_logos.vertices)} vertices, {len(final_logos.faces)} faces")
+    
+    if len(base.vertices) == 0 or len(final_logos.vertices) == 0:
+        raise Exception("Generated meshes are empty - cannot export")
+    
     # Export STLs for viewer
     base.export(body_stl_path)
     final_logos.export(logos_stl_path)
@@ -987,6 +994,8 @@ def generate_3d_coaster(
     scene = trimesh.Scene()
     scene.add_geometry(base, node_name='coaster_body')
     scene.add_geometry(final_logos, node_name='coaster_logos')
+    
+    logger.debug(f"Scene geometry count: {len(scene.geometry)}")
     
     try:
         scene.export(output_3mf_path, file_type='3mf')

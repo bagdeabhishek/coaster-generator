@@ -460,6 +460,12 @@ function init3DViewer() {
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    
+    // Ensure canvas doesn't expand beyond container
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
+    renderer.domElement.style.display = 'block';
+    
     elements.viewerContainer.appendChild(renderer.domElement);
     
     // Controls - check if OrbitControls loaded

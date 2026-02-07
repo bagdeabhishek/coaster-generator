@@ -192,3 +192,30 @@
         display: none !important;
     }
 }
+
+/* Layout fixes for viewer and downloads sections */
+#viewerSection,
+#downloadsSection {
+    width: 100%;
+    position: relative;
+}
+
+#viewerContainer {
+    position: relative;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box;
+}
+
+#viewerContainer canvas {
+    display: block;
+    width: 100% !important;
+    height: 100% !important;
+}
+
+/* Ensure sections don't overflow */
+#viewerSection > div,
+#downloadsSection > div {
+    width: 100%;
+    box-sizing: border-box;
+}
