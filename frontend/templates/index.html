@@ -173,7 +173,7 @@
                     </button>
 
                     <!-- Progress Section -->
-                    <div id="progressSection" class="hidden space-y-4">
+                    <div id="progressSection" class="hidden">
                         <div class="bg-gray-50 dark:bg-slate-700/50 rounded-lg p-6">
                             <div class="flex justify-between text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                                 <span id="progressStatus">Initializing...</span>
@@ -186,11 +186,11 @@
                     </div>
 
                     <!-- Review Section -->
-                    <div id="reviewSection" class="hidden space-y-4">
+                    <div id="reviewSection" class="hidden">
                         <div class="bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-400 dark:border-amber-600 rounded-xl p-6">
                             <h3 class="text-xl font-bold text-amber-800 dark:text-amber-200 mb-4 text-center">Review Generated Image</h3>
                             <div class="bg-white dark:bg-slate-800 rounded-lg p-4 shadow-inner">
-                                <img id="reviewImage" class="w-full max-h-96 object-contain rounded-lg" alt="Generated Preview">
+                                <img id="reviewImage" class="w-full max-h-96 object-contain rounded-lg" alt="Generated Preview" style="max-height: 384px;">
                             </div>
                             <div class="flex flex-col sm:flex-row gap-3 mt-6">
                                 <button id="approveBtn" class="flex-1 bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98]">
@@ -211,7 +211,7 @@
                     </div>
 
                     <!-- 3D Viewer Section -->
-                    <div id="viewerSection" class="hidden space-y-4">
+                    <div id="viewerSection" class="hidden">
                         <div class="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-400 dark:border-blue-600 rounded-xl p-6">
                             <h3 class="text-xl font-bold text-blue-800 dark:text-blue-200 mb-4 text-center">3D Preview</h3>
                             
@@ -224,7 +224,7 @@
                             </div>
                             
                             <!-- 3D Canvas -->
-                            <div id="viewerContainer" class="w-full h-80 sm:h-96 bg-black rounded-lg shadow-inner cursor-move"></div>
+                            <div id="viewerContainer" class="w-full h-80 sm:h-96 bg-black rounded-lg shadow-inner cursor-move" style="max-height: 384px;"></div>
                             
                             <p class="text-center text-sm text-gray-600 dark:text-gray-400 mt-3">
                                 Click & drag to rotate • Scroll to zoom • Right-click to pan
@@ -233,7 +233,7 @@
                     </div>
 
                     <!-- Downloads Section -->
-                    <div id="downloadsSection" class="hidden space-y-4">
+                    <div id="downloadsSection" class="hidden">
                         <div class="bg-green-50 dark:bg-green-900/20 border-2 border-green-400 dark:border-green-600 rounded-xl p-6">
                             <h3 class="text-xl font-bold text-green-800 dark:text-green-200 mb-4">Download Your Coaster</h3>
                             <div class="flex flex-col gap-3">
@@ -249,7 +249,7 @@
                     </div>
 
                     <!-- Error Section -->
-                    <div id="errorSection" class="hidden space-y-4">
+                    <div id="errorSection" class="hidden">
                         <div class="bg-red-50 dark:bg-red-900/20 border-2 border-red-400 dark:border-red-600 rounded-xl p-6">
                             <h3 class="text-xl font-bold text-red-800 dark:text-red-200 mb-2">Error</h3>
                             <p id="errorMessage" class="text-red-700 dark:text-red-300"></p>
