@@ -990,35 +990,91 @@ def generate_3d_coaster(
     logger.debug(f"Output 3MF: {output_3mf_path}")
     
     try:
-        # Export using trimesh's exchange module with proper 3MF formatting
-        import trimesh.exchange.threemf as threemf
+        # Create 3MF file manually with proper build section
+        import zipfile
+        import uuid
         
-        # Create scene with explicit transforms (identity transforms at origin)
-        scene = trimesh.Scene()
+        # Create XML content manually with proper format
+        xml_content = ['<?xml version="1.0" encoding="utf-8"?>']
+        xml_content.append('<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" unit="millimeter" xml:lang="en-US">')
+        xml_content.append('  <resources>')
         
-        # Add body at origin
-        base_transform = trimesh.transformations.identity_matrix()
-        scene.add_geometry(base, node_name='coaster_body', transform=base_transform)
+        # Add body object
+        body_id = 1
+        xml_content.append(f'    <object id="{body_id}" name="coaster_body" type="model">')
+        xml_content.append('      <mesh>')
+        xml_content.append('        <vertices>')
         
-        # Add logos at origin (they're already positioned correctly in the mesh)
-        logos_transform = trimesh.transformations.identity_matrix()
-        scene.add_geometry(final_logos, node_name='coaster_logos', transform=logos_transform)
+        # Write body vertices
+        for vertex in base.vertices:
+            xml_content.append(f'          <vertex x="{vertex[0]}" y="{vertex[1]}" z="{vertex[2]}" />')
         
-        logger.debug(f"Scene geometry count: {len(scene.geometry)}")
-        logger.debug(f"Scene graph nodes: {list(scene.graph.nodes)}")
+        xml_content.append('        </vertices>')
+        xml_content.append('        <triangles>')
         
-        # Export to 3MF using trimesh's built-in exporter
-        # This should include the build section automatically
-        scene.export(output_3mf_path, file_type='3mf')
+        # Write body faces (triangles)
+        for face in base.faces:
+            xml_content.append(f'          <triangle v1="{face[0]}" v2="{face[1]}" v3="{face[2]}" />')
         
-        # If the file is missing build section, add it manually
-        _fix_3mf_build_section(output_3mf_path)
+        xml_content.append('        </triangles>')
+        xml_content.append('      </mesh>')
+        xml_content.append('    </object>')
+        
+        # Add logos object
+        logos_id = 2
+        xml_content.append(f'    <object id="{logos_id}" name="coaster_logos" type="model">')
+        xml_content.append('      <mesh>')
+        xml_content.append('        <vertices>')
+        
+        # Write logos vertices
+        for vertex in final_logos.vertices:
+            xml_content.append(f'          <vertex x="{vertex[0]}" y="{vertex[1]}" z="{vertex[2]}" />')
+        
+        xml_content.append('        </vertices>')
+        xml_content.append('        <triangles>')
+        
+        # Write logos faces (triangles)
+        for face in final_logos.faces:
+            xml_content.append(f'          <triangle v1="{face[0]}" v2="{face[1]}" v3="{face[2]}" />')
+        
+        xml_content.append('        </triangles>')
+        xml_content.append('      </mesh>')
+        xml_content.append('    </object>')
+        
+        xml_content.append('  </resources>')
+        xml_content.append('  <build>')
+        xml_content.append(f'    <item objectid="{body_id}" p:UUID="{str(uuid.uuid4())}" />')
+        xml_content.append(f'    <item objectid="{logos_id}" p:UUID="{str(uuid.uuid4())}" />')
+        xml_content.append('  </build>')
+        xml_content.append('</model>')
+        
+        # Create 3MF zip file
+        with zipfile.ZipFile(output_3mf_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            # Add the model file
+            zf.writestr('3D/3dmodel.model', '\n'.join(xml_content))
+            
+            # Add required _rels/.rels file
+            rels_content = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" />
+</Relationships>'''
+            zf.writestr('_rels/.rels', rels_content)
+            
+            # Add [Content_Types].xml
+            content_types = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml" />
+  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml" />
+</Types>'''
+            zf.writestr('[Content_Types].xml', content_types)
         
         file_size = os.path.getsize(output_3mf_path)
         logger.info(f"3MF exported: {file_size} bytes ({file_size/1024:.1f} KB)")
         
     except Exception as e:
         logger.error(f"Failed to export 3MF: {e}")
+        import traceback
+        traceback.print_exc()
         raise Exception(f"Failed to export 3MF: {str(e)}")
 
     # Save SVG for debugging
