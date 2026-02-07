@@ -283,11 +283,12 @@ def get_rate_limit_key(request: Request) -> str:
     # Hash to create consistent length key
     return hashlib.sha256(key.encode()).hexdigest()[:24]
 
-# Initialize rate limiter with file-based storage if enabled
+# Initialize rate limiter with memory storage
+# Note: Rate limits reset on server restart. For persistence, use Redis instead.
 if RATE_LIMIT_ENABLED:
     limiter = Limiter(
         key_func=get_rate_limit_key,
-        storage_uri=f"file://{os.path.join(TEMP_DIR, 'rate_limits.db')}",
+        storage_uri="memory://",  # In-memory storage (resets on restart)
         default_limits=[]
     )
 else:
