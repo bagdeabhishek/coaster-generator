@@ -254,21 +254,16 @@ async function handleSubmit() {
 }
 
 function resetUI() {
-    // Hide all sections - both class and inline style
+    // Hide all sections
     elements.errorSection.classList.add('hidden');
-    elements.errorSection.style.display = 'none';
     elements.progressSection.classList.add('hidden');
-    elements.progressSection.style.display = 'none';
     elements.reviewSection.classList.add('hidden');
-    elements.reviewSection.style.display = 'none';
     elements.viewerSection.classList.add('hidden');
-    elements.viewerSection.style.display = 'none';
     elements.downloadsSection.classList.add('hidden');
-    elements.downloadsSection.style.display = 'none';
-
+    
     // Reset progress
     updateProgress(0, 'Initializing...');
-
+    
     // Clear viewer
     if (scene) {
         clearMeshes();
@@ -345,14 +340,12 @@ function updateProgress(percent, message) {
 
 function showReviewSection(jobId) {
     elements.progressSection.classList.add('hidden');
-    elements.progressSection.style.display = 'none';
     elements.reviewSection.classList.remove('hidden');
-    elements.reviewSection.style.display = 'block';
     elements.reviewSection.classList.add('animate-fade-in');
-
+    
     // Set the review image with cache-busting
     elements.reviewImage.src = `/api/preview-image/${jobId}?t=${Date.now()}`;
-
+    
     // Reset retry form
     elements.retryForm.classList.add('hidden');
     elements.retryImageInput.value = '';
@@ -375,13 +368,11 @@ elements.approveBtn.addEventListener('click', async function() {
             const error = await response.json();
             throw new Error(error.detail || 'Failed to confirm');
         }
-
+        
         // Hide review and show progress
         elements.reviewSection.classList.add('hidden');
-        elements.reviewSection.style.display = 'none';
         elements.progressSection.classList.remove('hidden');
-        elements.progressSection.style.display = 'block';
-
+        
         // Continue polling
         startPolling(currentJobId);
         
@@ -586,12 +577,9 @@ function loadSTL(url, material) {
 async function show3DViewer(urls) {
     downloadUrls = urls;
     elements.progressSection.classList.add('hidden');
-    elements.progressSection.style.display = 'none';
     elements.viewerSection.classList.remove('hidden');
-    elements.viewerSection.style.display = 'block';
     elements.viewerSection.classList.add('animate-fade-in');
     elements.downloadsSection.classList.remove('hidden');
-    elements.downloadsSection.style.display = 'block';
     elements.downloadsSection.classList.add('animate-fade-in');
 
     // Update download link (3MF file)
@@ -696,11 +684,8 @@ function setActiveViewerButton(btn) {
 
 function showError(message) {
     elements.progressSection.classList.add('hidden');
-    elements.progressSection.style.display = 'none';
     elements.reviewSection.classList.add('hidden');
-    elements.reviewSection.style.display = 'none';
     elements.errorSection.classList.remove('hidden');
-    elements.errorSection.style.display = 'block';
     elements.errorSection.classList.add('animate-fade-in');
     elements.errorMessage.textContent = message;
 }
