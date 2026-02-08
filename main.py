@@ -1052,7 +1052,7 @@ def generate_3d_coaster(
         
         xml_content.append('  </resources>')
         xml_content.append('  <build>')
-        xml_content.append(f'    <item objectid="{composite_id}" p:UUID="{str(uuid.uuid4())}" />')
+        xml_content.append(f'    <item objectid="{composite_id}" />')
         xml_content.append('  </build>')
         xml_content.append('</model>')
         
