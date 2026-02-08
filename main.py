@@ -396,11 +396,20 @@ async def add_security_headers(request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
+        "base-uri 'self'; "
+        "object-src 'none'; "
+        "frame-ancestors 'none'; "
+        "form-action 'self'; "
         "script-src 'self' 'unsafe-inline' cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com threejs.org; "
         "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' blob: data:;"
+        "img-src 'self' blob: data:; "
+        "connect-src 'self' https://api.bfl.ai https://auth.bfl.ai; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "upgrade-insecure-requests"
     )
     return response
 
