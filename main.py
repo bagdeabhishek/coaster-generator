@@ -1040,11 +1040,19 @@ def generate_3d_coaster(
         xml_content.append('        </triangles>')
         xml_content.append('      </mesh>')
         xml_content.append('    </object>')
+
+        # Add composite object with two components
+        composite_id = 3
+        xml_content.append(f'    <object id="{composite_id}" name="coaster" type="model">')
+        xml_content.append('      <components>')
+        xml_content.append(f'        <component objectid="{body_id}" />')
+        xml_content.append(f'        <component objectid="{logos_id}" />')
+        xml_content.append('      </components>')
+        xml_content.append('    </object>')
         
         xml_content.append('  </resources>')
         xml_content.append('  <build>')
-        xml_content.append(f'    <item objectid="{body_id}" p:UUID="{str(uuid.uuid4())}" />')
-        xml_content.append(f'    <item objectid="{logos_id}" p:UUID="{str(uuid.uuid4())}" />')
+        xml_content.append(f'    <item objectid="{composite_id}" p:UUID="{str(uuid.uuid4())}" />')
         xml_content.append('  </build>')
         xml_content.append('</model>')
         
