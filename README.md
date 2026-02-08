@@ -11,7 +11,7 @@ Transform any image into a 3D printable coaster using AI-powered image processin
 - **AI-Powered Image Processing**: Uses BFL FLUX.2 API to convert images into clean, vector-ready graphics
 - **Interactive Review Workflow**: Preview AI-generated images before 3D conversion
 - **Real-time 3D Preview**: Interactive Three.js viewer to visualize coasters before download
-- **Dual STL Output**: Separate files for base cylinder and extruded logos (optimized for dual-color printing)
+- **Combined 3MF Output**: Single 3MF containing body + logos for multi-color printing
 - **Self-Serve API Keys**: Users can optionally provide their own BFL API keys
 - **Responsive Web Interface**: Modern, mobile-friendly UI with progress tracking
 - **Configurable Parameters**: Full control over dimensions, logo depth, scaling, and rotation
@@ -25,7 +25,7 @@ Transform any image into a 3D printable coaster using AI-powered image processin
 3. **Review Phase** → User reviews and approves the generated image
 4. **Vectorization** → vtracer converts image to SVG paths
 5. **3D Generation** → trimesh creates extruded 3D models
-6. **Download** → Two STL files (Body + Logos) ready for printing
+6. **Download** → Single 3MF file with body + logos ready for printing
 
 ### Tech Stack
 
@@ -107,7 +107,7 @@ The application will be available at `http://localhost:8000`
    - **Top/Bottom Rotation**: Rotate logos on each side
 3. **Review**: Approve or retry the AI-generated image
 4. **3D Preview**: Interact with the 3D model (rotate, zoom, pan)
-5. **Download**: Get your Body.stl and Logos.stl files
+5. **Download**: Get your combined 3MF file
 
 ### API Endpoints
 
@@ -119,8 +119,9 @@ The application will be available at `http://localhost:8000`
 | `/api/confirm/{job_id}` | POST | Confirm and proceed to 3D |
 | `/api/retry/{job_id}` | POST | Retry with new image |
 | `/api/preview-image/{job_id}` | GET | Get generated image |
-| `/api/download/{job_id}/body` | GET | Download Body STL |
-| `/api/download/{job_id}/logos` | GET | Download Logos STL |
+| `/api/download/{job_id}` | GET | Download combined 3MF |
+| `/api/download/{job_id}/body` | GET | Download Body STL (viewer) |
+| `/api/download/{job_id}/logos` | GET | Download Logos STL (viewer) |
 | `/api/download/{job_id}/preview` | GET | Download PNG preview |
 
 ### Using Custom API Keys
@@ -172,18 +173,14 @@ concentric black rings...
 ### Printing Options
 
 **Single Color:**
-- Print `Body.stl` only
-- Simple and fast
+- Print the combined `coaster_*.3mf` with a single filament
 
 **Dual Color (Recommended):**
-1. Print `Body.stl` in color A (e.g., white)
-2. Pause at layer where logos begin (usually 80-90% of thickness)
-3. Switch to color B (e.g., black)
-4. Print `Logos.stl` or continue with color change
+- Open the combined `coaster_*.3mf` in your slicer and assign colors per part
+- Or pause and swap filament at the logo layer if your slicer doesn’t support part colors
 
 **Manual Assembly:**
-- Print `Body.stl` separately
-- Print `Logos.stl` separately
+- Use the STL endpoints to print body and logos separately
 - Glue logos into the recessed areas
 
 ## 🚀 Deployment

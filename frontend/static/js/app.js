@@ -436,6 +436,11 @@ elements.retrySubmitBtn.addEventListener('click', async function() {
 // ============================================
 
 function init3DViewer() {
+    // Clear any existing canvases to prevent stacking
+    while (elements.viewerContainer.firstChild) {
+        elements.viewerContainer.removeChild(elements.viewerContainer.firstChild);
+    }
+
     // Scene setup
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
@@ -448,13 +453,14 @@ function init3DViewer() {
     if (width === 0 || height === 0) {
         width = 800;
         height = 600;
-        console.warn('Viewer container has no dimensions, using default size:', width, 'x', height);
+        // Fallback dimensions when container isn't ready
     }
     
-    // Camera
+    // Camera - position further back to see the models
     const aspect = width / height;
-    camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
-    camera.position.set(0, 0, 150);
+    camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 2000);
+    camera.position.set(0, 0, 300);
+    camera.lookAt(0, 0, 0);
     
     // Renderer
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -465,6 +471,10 @@ function init3DViewer() {
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
     renderer.domElement.style.display = 'block';
+    renderer.domElement.style.position = 'absolute';
+    renderer.domElement.style.top = '0';
+    renderer.domElement.style.left = '0';
+    renderer.domElement.style.zIndex = '1';
     
     elements.viewerContainer.appendChild(renderer.domElement);
     
@@ -476,7 +486,7 @@ function init3DViewer() {
         controls.enableZoom = true;
         controls.enablePan = true;
     } else {
-        console.warn('OrbitControls not loaded - viewer will work without mouse controls');
+        // OrbitControls not loaded; continue without mouse controls
         controls = null;
     }
     
@@ -508,7 +518,7 @@ function init3DViewer() {
 function toggleFullscreen() {
     if (!document.fullscreenElement) {
         elements.viewerContainer.requestFullscreen().catch(err => {
-            console.log('Fullscreen not supported');
+            // Fullscreen not supported; ignore
         });
     } else {
         document.exitFullscreen();
@@ -543,31 +553,72 @@ function clearMeshes() {
     currentMeshes = [];
 }
 
+function frameCameraToMeshes() {
+    if (!camera || currentMeshes.length === 0) return;
+
+    const box = new THREE.Box3();
+    currentMeshes.forEach(mesh => box.expandByObject(mesh));
+
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+
+    if (maxDim === 0) return;
+
+    const fov = camera.fov * (Math.PI / 180);
+    let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+    cameraZ *= 1.5;
+
+    camera.position.set(center.x, center.y, center.z + cameraZ);
+    camera.near = Math.max(0.1, cameraZ / 100);
+    camera.far = cameraZ * 100;
+    camera.updateProjectionMatrix();
+    camera.lookAt(center);
+
+    if (controls) {
+        controls.target.copy(center);
+        controls.update();
+    }
+}
+
 function loadSTL(url, material) {
     return new Promise((resolve, reject) => {
         stlLoader.load(url,
             function(geometry) {
                 geometry.computeVertexNormals();
                 geometry.center();
-                
+
                 const mesh = new THREE.Mesh(geometry, material);
-                
-                // Scale to fit view
-                const box = new THREE.Box3().setFromObject(mesh);
-                const size = box.getSize(new THREE.Vector3());
-                const maxDim = Math.max(size.x, size.y, size.z);
-                const scale = 80 / maxDim;
-                mesh.scale.set(scale, scale, scale);
-                
+
+                // Scale to fit view - compute bounding box from geometry directly
+                if (!geometry.boundingBox) {
+                    geometry.computeBoundingBox();
+                }
+                const box = geometry.boundingBox;
+
+                if (box) {
+                    const size = new THREE.Vector3();
+                    box.getSize(size);
+                    const maxDim = Math.max(size.x, size.y, size.z);
+
+                    if (maxDim > 0) {
+                        let scale = 80 / maxDim;
+                        if (scale > 10) scale = 10;
+                        if (scale < 0.1) scale = 0.1;
+                        mesh.scale.set(scale, scale, scale);
+                    }
+                }
+
                 scene.add(mesh);
                 currentMeshes.push(mesh);
                 resolve(mesh);
             },
-            function(xhr) {
-                console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+            function(progress) {
+                // Loading progress
+                // Loading progress
             },
             function(error) {
-                console.error('Error loading STL:', error);
+                console.error('Error loading STL:', url, error);
                 reject(error);
             }
         );
@@ -605,6 +656,7 @@ async function loadBodyModel() {
     });
     try {
         await loadSTL(downloadUrls.body, material);
+        frameCameraToMeshes();
     } catch (error) {
         console.error('Failed to load body model:', error);
     }
@@ -619,6 +671,7 @@ async function loadLogosModel() {
     });
     try {
         await loadSTL(downloadUrls.logos, material);
+        frameCameraToMeshes();
     } catch (error) {
         console.error('Failed to load logos model:', error);
     }
@@ -646,6 +699,7 @@ async function loadBothModels() {
             loadSTL(downloadUrls.body, bodyMaterial),
             loadSTL(downloadUrls.logos, logosMaterial)
         ]);
+        frameCameraToMeshes();
     } catch (error) {
         console.error('Failed to load models:', error);
     }
@@ -699,7 +753,7 @@ function init() {
     initFileUpload();
     initForm();
     
-    console.log('3D Coaster Generator initialized');
+    // Initialized
 }
 
 // Start when DOM is ready
