@@ -25,6 +25,7 @@ import vtracer
 from PIL import Image
 import numpy as np
 from shapely.geometry import Polygon
+from shapely.ops import unary_union
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
@@ -876,12 +877,57 @@ def generate_3d_coaster(
     if not polygons:
         raise Exception("No valid polygons found in SVG")
     
-    # Extrude polygons to create logo meshes
-    logger.info(f"Extruding {len(polygons)} polygons...")
+    # Process polygons to handle holes (subtract contained polygons)
+    logger.info(f"Initial polygons: {len(polygons)}")
+    
+    # Filter out empty and compute areas
+    polys = [p for p in polygons if not p.is_empty]
+    polys_sorted = sorted(polys, key=lambda p: abs(p.area), reverse=True)
+    
+    # Drop the largest polygon if it's acting as a solid background fill
+    if polys_sorted and len(polys_sorted) > 1:
+        max_area = abs(polys_sorted[0].area)
+        second_area = abs(polys_sorted[1].area)
+        # If the largest is significantly larger than the rest, it's likely a background
+        if max_area > second_area * 1.5:
+            logger.info(f"Dropping background polygon (area: {max_area})")
+            polys_sorted.pop(0)
+
+    # Subtraction logic to preserve holes
+    used = [False] * len(polys_sorted)
+    processed_polys = []
+
+    for i, outer in enumerate(polys_sorted):
+        if used[i]:
+            continue
+
+        holes = []
+        for j in range(i + 1, len(polys_sorted)):
+            if used[j]:
+                continue
+            inner = polys_sorted[j]
+            # Give a small buffer to handle floating point imprecision
+            if outer.buffer(1e-5).contains(inner):
+                holes.append(inner)
+                used[j] = True
+
+        if holes:
+            hole_union = unary_union(holes)
+            carved = outer.difference(hole_union)
+            if carved.is_empty:
+                continue
+            if carved.geom_type == "Polygon":
+                processed_polys.append(carved)
+            elif carved.geom_type == "MultiPolygon":
+                processed_polys.extend(list(carved.geoms))
+        else:
+            processed_polys.append(outer)
+
+    logger.info(f"Extruding {len(processed_polys)} processed polygons (holes preserved)...")
     logo_meshes = []
     target_size = params.diameter * params.scale
     
-    for i, poly in enumerate(polygons):
+    for i, poly in enumerate(processed_polys):
         try:
             # Extrude the polygon
             extruded = trimesh.creation.extrude_polygon(
