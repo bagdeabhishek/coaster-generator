@@ -106,15 +106,38 @@ def composite_coaster_image(portrait_bytes: bytes, stamp_text: str) -> bytes:
     )
     
     # 4. Paste and scale portrait into the center
-    portrait_target_size = int(inner_radius * 2 * 0.95) 
+    # Because the AI might generate messy outer rings, we scale the AI image so its inner circle
+    # fits exactly inside our new perfect inner_radius, and we use a circular white mask to ERASE
+    # whatever garbage rings the AI drew on the outside.
+    
+    # The AI image has an inner circle. Let's assume it takes up about 60% of the AI canvas.
+    # We want to scale that 60% to fit into our `inner_radius` area.
+    # So the total AI image needs to be scaled up.
+    ai_scale_factor = (inner_radius * 2) / (512 * 0.7)  # Assuming portrait is 70% of 512
+    portrait_target_size = int(512 * ai_scale_factor)
     portrait_resized = portrait_img.resize((portrait_target_size, portrait_target_size), Image.Resampling.LANCZOS)
     
-    # Make white pixels transparent
+    # Create a circular mask to ONLY keep the center portrait part of the AI image
+    mask = Image.new("L", (portrait_target_size, portrait_target_size), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    # The area to keep is the inner circle
+    keep_radius = inner_radius - 10
+    mask_center = portrait_target_size // 2
+    mask_draw.ellipse(
+        [(mask_center - keep_radius, mask_center - keep_radius),
+         (mask_center + keep_radius, mask_center + keep_radius)],
+        fill=255
+    )
+    
+    # Make white pixels transparent in the center too
     data = portrait_resized.getdata()
     new_data = []
-    for item in data:
-        if item[0] > 240 and item[1] > 240 and item[2] > 240:
-            new_data.append((255, 255, 255, 0))
+    mask_data = mask.getdata()
+    for i, item in enumerate(data):
+        if mask_data[i] == 0:
+            new_data.append((255, 255, 255, 0)) # Outside the center circle = transparent
+        elif item[0] > 240 and item[1] > 240 and item[2] > 240:
+            new_data.append((255, 255, 255, 0)) # White background inside = transparent
         else:
             new_data.append(item)
     portrait_resized.putdata(new_data)

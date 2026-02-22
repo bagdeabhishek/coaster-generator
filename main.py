@@ -107,6 +107,7 @@ class Job:
     created_at: datetime = field(default_factory=datetime.now)
     error: Optional[str] = None
     preview_image_path: Optional[str] = None  # Path to saved preview image
+    original_image_path: Optional[str] = None  # Original uploaded image for regeneration
     params: Optional['ProcessRequest'] = None  # Store params for confirmation step
     api_key: Optional[str] = None  # User-provided BFL API key (optional)
     stamp_text: str = "Abhishek Does Stuff"  # Text to display on coaster stamp
@@ -589,8 +590,8 @@ async def bfl_flux_process(image_bytes: bytes, api_key: str, stamp_text: str = "
     try:
         with open(template_file_path, "r", encoding="utf-8") as f:
             prompt_template = f.read().strip()
-        # Replace {{stamp_text}} with user-provided text
-        prompt = prompt_template.replace("{{stamp_text}}", stamp_text)
+        # Replace {{stamp_text}} with an empty string so the AI draws the rings but leaves the space mostly blank for us to draw over
+        prompt = prompt_template.replace("{{stamp_text}}", "")
         logger.info(f"✓ Prompt template loaded: {len(prompt_template)} chars")
         logger.info(f"✓ Prompt generated with stamp text: {len(prompt)} chars")
     except Exception as e:
