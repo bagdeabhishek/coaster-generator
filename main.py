@@ -595,8 +595,8 @@ async def bfl_flux_process(image_bytes: bytes, api_key: str, stamp_text: str = "
         prompt = f"flat vector illustration, solid colors, no gradients, high contrast, 2d cartoon style, white background, clean lines suitable for vector tracing. Circular stamp with text '{stamp_text}' on top arc."
     
     # Set parameters based on BFL API documentation
-    width = 512
-    height = 512
+    width = 1024
+    height = 1024
     seed = 432262096973491  # Same seed as ComfyUI workflow for reproducibility
     output_format = "png"  # Get PNG directly to avoid conversion issues
     
