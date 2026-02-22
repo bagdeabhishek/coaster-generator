@@ -12,16 +12,17 @@
                 extend: {
                     colors: {
                         primary: {
-                            50: '#eff6ff',
-                            100: '#dbeafe',
-                            200: '#bfdbfe',
-                            300: '#93c5fd',
-                            400: '#60a5fa',
-                            500: '#3b82f6',
-                            600: '#2563eb',
-                            700: '#1d4ed8',
-                            800: '#1e40af',
-                            900: '#1e3a8a',
+                            50: '#f5f3ff',
+                            100: '#ede9fe',
+                            200: '#ddd6fe',
+                            300: '#c4b5fd',
+                            400: '#a78bfa',
+                            500: '#8b5cf6',
+                            600: '#7c3aed',
+                            700: '#6d28d9',
+                            800: '#5b21b6',
+                            900: '#4c1d95',
+                            950: '#2e1065',
                         }
                     },
                     animation: {
@@ -41,7 +42,7 @@
     <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
     <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 </head>
-<body class="bg-slate-50 dark:bg-slate-900 min-h-screen transition-colors duration-300">
+<body class="bg-zinc-50 dark:bg-zinc-900 min-h-screen transition-colors duration-300">
     <!-- Dark mode detection script -->
     <script>
         if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
@@ -52,13 +53,13 @@
     </script>
 
     <!-- Minimal Navbar -->
-    <nav class="sticky top-0 z-50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
+    <nav class="sticky top-0 z-50 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div class="flex items-center gap-3">
-                <div class="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-primary-500/30">C</div>
-                <span class="font-bold text-xl tracking-tight text-slate-900 dark:text-white">Coaster<span class="text-primary-600 dark:text-primary-400">Gen</span></span>
+                <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-primary-500/40 border border-primary-400/20">C</div>
+                <span class="font-bold text-xl tracking-tight text-zinc-900 dark:text-white">Coaster<span class="text-primary-600 dark:text-primary-400">Gen</span></span>
             </div>
-            <button id="darkModeToggle" class="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors" aria-label="Toggle dark mode">
+            <button id="darkModeToggle" class="p-2 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors" aria-label="Toggle dark mode">
                 <svg id="sunIcon" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
                 <svg id="moonIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
             </button>
@@ -70,101 +71,101 @@
             
             <!-- Left Column: Configuration -->
             <div class="w-full lg:w-5/12 space-y-6">
-                <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700/50 p-6">
-                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-6">Create New Coaster</h2>
+                <div class="bg-white dark:bg-zinc-800 rounded-2xl shadow-sm border border-zinc-200 dark:border-zinc-700/50 p-6">
+                    <h2 class="text-lg font-semibold text-zinc-900 dark:text-white mb-6">Create New Coaster</h2>
                     
                     <div class="space-y-6">
                         <!-- Upload Section -->
                         <div id="uploadSection">
-                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                            <label class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
                                 Upload Image <span class="text-red-500">*</span>
                             </label>
-                            <div id="dropZone" class="border border-dashed border-slate-300 dark:border-slate-600 rounded-xl p-8 text-center hover:border-primary-500 dark:hover:border-primary-500 hover:bg-slate-50 dark:hover:bg-slate-800/80 transition-all duration-200 cursor-pointer bg-slate-50/50 dark:bg-slate-800/30">
+                            <div id="dropZone" class="border border-dashed border-zinc-300 dark:border-zinc-600 rounded-xl p-8 text-center hover:border-primary-500 dark:hover:border-primary-500 hover:bg-zinc-50 dark:hover:bg-zinc-800/80 transition-all duration-200 cursor-pointer bg-zinc-50/50 dark:bg-zinc-800/30">
                                 <input type="file" id="imageInput" name="image" accept="image/*" required class="hidden">
-                                <svg class="mx-auto h-12 w-12 text-slate-400 dark:text-slate-500 mb-4" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                                <svg class="mx-auto h-12 w-12 text-zinc-400 dark:text-zinc-500 mb-4" stroke="currentColor" fill="none" viewBox="0 0 48 48">
                                     <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                                 </svg>
-                                <p class="text-slate-600 dark:text-slate-400 text-sm sm:text-base font-medium">Drop your image here or click to browse</p>
-                                <p class="text-slate-400 dark:text-slate-500 text-xs mt-2">Supports: JPG, PNG, WebP</p>
+                                <p class="text-zinc-600 dark:text-zinc-400 text-sm sm:text-base font-medium">Drop your image here or click to browse</p>
+                                <p class="text-zinc-400 dark:text-zinc-500 text-xs mt-2">Supports: JPG, PNG, WebP</p>
                                 <img id="imagePreview" class="mt-4 max-h-48 mx-auto rounded-lg hidden shadow-md" alt="Preview">
                             </div>
                         </div>
 
                         <!-- BFL API Key (Optional) -->
                         <div>
-                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                                BFL API Key <span class="text-slate-400 dark:text-slate-500 font-normal">(optional)</span>
+                            <label class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
+                                BFL API Key <span class="text-zinc-400 dark:text-zinc-500 font-normal">(optional)</span>
                             </label>
                             <input type="password" id="apiKey" name="api_key" 
                                 placeholder="Enter your BFL API key or leave blank"
-                                class="w-full px-4 py-2.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
-                            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                class="w-full px-4 py-2.5 rounded-md border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500 focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
+                            <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                                 Leave empty to use server key. <a href="https://api.bfl.ai" target="_blank" class="text-primary-600 dark:text-primary-400 hover:underline">Get your own key</a> for usage tracking.
                             </p>
                         </div>
 
                         <!-- Stamp Text -->
                         <div>
-                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
-                                Stamp Text <span class="text-slate-400 dark:text-slate-500 font-normal">(appears on coaster ring)</span>
+                            <label class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
+                                Stamp Text <span class="text-zinc-400 dark:text-zinc-500 font-normal">(appears on coaster ring)</span>
                             </label>
                             <input type="text" id="stampText" name="stamp_text" 
                                 value="Abhishek Does Stuff"
                                 maxlength="50"
-                                class="w-full px-4 py-2.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
-                            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                class="w-full px-4 py-2.5 rounded-md border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500 focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
+                            <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                                 This text curves along the top of your coaster stamp (max 50 characters)
                             </p>
                         </div>
 
                         <!-- Advanced Settings Accordion -->
                         <div class="pt-2">
-                            <div class="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
-                                <button type="button" id="advancedToggleBtn" class="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/50 flex justify-between items-center text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+                            <div class="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-hidden">
+                                <button type="button" id="advancedToggleBtn" class="w-full px-4 py-3 bg-zinc-50/80 dark:bg-zinc-800/30 flex justify-between items-center text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors">
                                     <span class="flex items-center gap-2">
-                                        <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                                        <svg class="w-4 h-4 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                                         Advanced Settings
                                     </span>
                                     <svg id="advancedChevron" class="w-4 h-4 transform transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                                 </button>
-                                <div id="advancedContent" class="hidden p-4 space-y-4 bg-white dark:bg-slate-800">
+                                <div id="advancedContent" class="hidden p-4 space-y-4 bg-white dark:bg-zinc-800">
                                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div>
-                                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Diameter (mm)</label>
+                                            <label class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Diameter (mm)</label>
                                             <input type="number" id="diameter" name="diameter" value="100" min="50" max="200" step="1"
-                                                class="w-full px-4 py-2.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
+                                                class="w-full px-4 py-2.5 rounded-md border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
                                         </div>
                                         <div>
-                                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Thickness (mm)</label>
+                                            <label class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Thickness (mm)</label>
                                             <input type="number" id="thickness" name="thickness" value="5" min="2" max="20" step="0.5"
-                                                class="w-full px-4 py-2.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
+                                                class="w-full px-4 py-2.5 rounded-md border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
                                         </div>
                                         <div>
-                                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Logo Depth (mm)</label>
+                                            <label class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Logo Depth (mm)</label>
                                             <input type="number" id="logoDepth" name="logo_depth" value="0.6" min="0.1" max="5" step="0.1"
-                                                class="w-full px-4 py-2.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
+                                                class="w-full px-4 py-2.5 rounded-md border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
                                         </div>
                                         <div>
-                                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Logo Scale</label>
+                                            <label class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Logo Scale</label>
                                             <input type="number" id="scale" name="scale" value="0.85" min="0.1" max="1.5" step="0.05"
-                                                class="w-full px-4 py-2.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
-                                            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Relative to coaster diameter</p>
+                                                class="w-full px-4 py-2.5 rounded-md border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
+                                            <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Relative to coaster diameter</p>
                                         </div>
                                         <div>
-                                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Top Rotation (°)</label>
+                                            <label class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Top Rotation (°)</label>
                                             <input type="number" id="topRotate" name="top_rotate" value="0" min="0" max="360" step="1"
-                                                class="w-full px-4 py-2.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
+                                                class="w-full px-4 py-2.5 rounded-md border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
                                         </div>
                                         <div>
-                                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Bottom Rotation (°)</label>
+                                            <label class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Bottom Rotation (°)</label>
                                             <input type="number" id="bottomRotate" name="bottom_rotate" value="0" min="0" max="360" step="1"
-                                                class="w-full px-4 py-2.5 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
+                                                class="w-full px-4 py-2.5 rounded-md border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
                                         </div>
                                     </div>
                                     <div class="flex items-center pt-2">
                                         <input type="checkbox" id="flipHorizontal" name="flip_horizontal" checked 
-                                            class="w-4 h-4 text-primary-600 border-slate-300 rounded focus:ring-primary-500 dark:bg-slate-700 dark:border-slate-600">
-                                        <label for="flipHorizontal" class="ml-2 text-sm font-medium text-slate-700 dark:text-slate-300 cursor-pointer">
+                                            class="w-4 h-4 text-primary-600 border-zinc-300 rounded focus:ring-primary-500 dark:bg-zinc-700 dark:border-zinc-600">
+                                        <label for="flipHorizontal" class="ml-2 text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
                                             Flip Horizontal (Mirror)
                                         </label>
                                     </div>
@@ -173,15 +174,15 @@
                         </div>
 
                         <!-- Info Card -->
-                        <div class="mt-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-4 rounded-xl">
-                            <p class="text-sm text-slate-600 dark:text-slate-400">
-                                <strong class="text-slate-900 dark:text-slate-200">How it works:</strong> Upload an image and we'll generate a 3D coaster using AI. You'll review the AI-generated design before we create the 3D model.
+                        <div class="mt-4 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 p-4 rounded-xl">
+                            <p class="text-sm text-zinc-600 dark:text-zinc-400">
+                                <strong class="text-zinc-900 dark:text-zinc-200">How it works:</strong> Upload an image and we'll generate a 3D coaster using AI. You'll review the AI-generated design before we create the 3D model.
                             </p>
                         </div>
                         
                         <div class="pt-2">
                             <!-- Generate Button -->
-                            <button id="generateBtn" class="w-full bg-slate-900 hover:bg-slate-800 dark:bg-primary-600 dark:hover:bg-primary-700 text-white font-medium py-3.5 px-6 rounded-xl shadow-sm transition-all duration-200 hover:shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">
+                            <button id="generateBtn" class="w-full bg-gradient-to-r from-primary-600 to-primary-500 hover:from-primary-700 hover:to-primary-600 text-white font-medium py-3.5 px-6 rounded-xl shadow-sm transition-all duration-200 hover:shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">
                                 <span id="generateBtnText">Generate 3D Coaster</span>
                             </button>
                         </div>
@@ -195,22 +196,22 @@
                 <div class="space-y-6">
                     
                     <!-- Empty State (Shown when nothing is happening) -->
-                    <div id="emptyState" class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700/50 p-12 text-center flex flex-col items-center justify-center min-h-[400px]">
-                        <div class="w-16 h-16 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center mb-4">
-                            <svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                    <div id="emptyState" class="bg-white dark:bg-zinc-800 rounded-2xl shadow-sm border border-zinc-200 dark:border-zinc-700/50 p-12 text-center flex flex-col items-center justify-center min-h-[400px]">
+                        <div class="w-16 h-16 bg-zinc-100 dark:bg-zinc-700 rounded-full flex items-center justify-center mb-4">
+                            <svg class="w-8 h-8 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                         </div>
-                        <h3 class="text-lg font-medium text-slate-900 dark:text-white mb-2">No Coaster Generated Yet</h3>
-                        <p class="text-sm text-slate-500 dark:text-slate-400 max-w-sm">Upload an image and click generate to create your custom 3D printable coaster model.</p>
+                        <h3 class="text-lg font-medium text-zinc-900 dark:text-white mb-2">No Coaster Generated Yet</h3>
+                        <p class="text-sm text-zinc-500 dark:text-zinc-400 max-w-sm">Upload an image and click generate to create your custom 3D printable coaster model.</p>
                     </div>
 
                     <!-- Progress Section -->
                     <div id="progressSection" class="hidden h-full flex flex-col justify-center">
-                        <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700/50 p-8 text-center">
-                            <div class="flex justify-between text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                        <div class="bg-white dark:bg-zinc-800 rounded-2xl shadow-sm border border-zinc-200 dark:border-zinc-700/50 p-8 text-center">
+                            <div class="flex justify-between text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
                                 <span id="progressStatus">Initializing...</span>
                                 <span id="progressPercent">0%</span>
                             </div>
-                            <div class="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-3 overflow-hidden">
+                            <div class="w-full bg-zinc-100 dark:bg-zinc-700 rounded-full h-3 overflow-hidden">
                                 <div id="progressBar" class="bg-primary-500 h-full rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
                             </div>
                         </div>
@@ -218,23 +219,23 @@
 
                     <!-- Review Section -->
                     <div id="reviewSection" class="hidden">
-                        <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700/50 p-6 flex flex-col h-full">
-                            <h3 class="text-xl font-bold text-slate-900 dark:text-white mb-4 text-center">Review Generated Image</h3>
-                            <div class="bg-slate-50 dark:bg-slate-900/50 rounded-lg p-4 border border-slate-100 dark:border-slate-700 flex-grow flex items-center justify-center">
+                        <div class="bg-white dark:bg-zinc-800 rounded-2xl shadow-sm border border-zinc-200 dark:border-zinc-700/50 p-6 flex flex-col h-full">
+                            <h3 class="text-xl font-bold text-zinc-900 dark:text-white mb-4 text-center">Review Generated Image</h3>
+                            <div class="bg-zinc-50 dark:bg-zinc-900/50 rounded-lg p-4 border border-zinc-100 dark:border-zinc-700 flex-grow flex items-center justify-center">
                                 <img id="reviewImage" class="w-full max-h-96 object-contain rounded-lg shadow-sm" alt="Generated Preview" style="max-height: 500px;">
                             </div>
                             <div class="flex flex-col sm:flex-row gap-3 mt-6">
-                                <button id="approveBtn" class="flex-1 bg-slate-900 hover:bg-slate-800 dark:bg-emerald-600 dark:hover:bg-emerald-700 text-white font-medium py-2.5 px-5 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md">
+                                <button id="approveBtn" class="flex-1 bg-zinc-900 hover:bg-zinc-800 dark:bg-emerald-600 dark:hover:bg-emerald-700 text-white font-medium py-2.5 px-5 rounded-lg shadow-sm transition-all duration-200 hover:shadow-md">
                                     Approve & Continue
                                 </button>
-                                <button id="retryBtn" class="flex-1 bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600 dark:hover:bg-slate-700 font-medium py-2.5 px-5 rounded-lg transition-all duration-200">
+                                <button id="retryBtn" class="flex-1 bg-white text-zinc-700 border border-zinc-200 hover:bg-zinc-50 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-600 dark:hover:bg-zinc-700 font-medium py-2.5 px-5 rounded-lg transition-all duration-200">
                                     Try Again
                                 </button>
                             </div>
-                            <div id="retryForm" class="hidden mt-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-dashed border-slate-300 dark:border-slate-600">
-                                <h4 class="font-semibold text-slate-900 dark:text-white mb-3">Upload Different Image</h4>
-                                <input type="file" id="retryImageInput" accept="image/*" class="w-full mb-3 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-slate-200 file:text-slate-700 hover:file:bg-slate-300 dark:file:bg-slate-700 dark:file:text-slate-200 dark:hover:file:bg-slate-600 transition-colors">
-                                <button id="retrySubmitBtn" class="w-full bg-primary-600 hover:bg-primary-700 text-white font-medium py-2 px-4 rounded-md transition-all duration-200 shadow-sm">
+                            <div id="retryForm" class="hidden mt-4 p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-xl border border-dashed border-zinc-300 dark:border-zinc-600">
+                                <h4 class="font-semibold text-zinc-900 dark:text-white mb-3">Upload Different Image</h4>
+                                <input type="file" id="retryImageInput" accept="image/*" class="w-full mb-3 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-medium file:bg-zinc-200 file:text-zinc-700 hover:file:bg-zinc-300 dark:file:bg-zinc-700 dark:file:text-zinc-200 dark:hover:file:bg-zinc-600 transition-colors">
+                                <button id="retrySubmitBtn" class="w-full bg-gradient-to-br from-primary-500 to-primary-700 hover:bg-primary-700 text-white font-medium py-2 px-4 rounded-md transition-all duration-200 shadow-sm">
                                     Submit New Image
                                 </button>
                             </div>
@@ -243,21 +244,21 @@
 
                     <!-- 3D Viewer Section -->
                     <div id="viewerSection" class="hidden">
-                        <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700/50 p-6">
-                            <h3 class="text-xl font-bold text-slate-900 dark:text-white mb-4 text-center">3D Preview</h3>
+                        <div class="bg-white dark:bg-zinc-800 rounded-2xl shadow-sm border border-zinc-200 dark:border-zinc-700/50 p-6">
+                            <h3 class="text-xl font-bold text-zinc-900 dark:text-white mb-4 text-center">3D Preview</h3>
                             
                             <!-- Viewer Controls -->
                             <div class="flex flex-wrap justify-center gap-2 mb-4">
-                                <button id="viewBodyBtn" class="viewer-btn active px-4 py-2 bg-slate-800 text-white dark:bg-slate-700 rounded-md text-sm font-medium transition-all">View Body</button>
-                                <button id="viewLogosBtn" class="viewer-btn px-4 py-2 bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600 dark:hover:bg-slate-700 rounded-md text-sm font-medium transition-all">View Logos</button>
-                                <button id="viewBothBtn" class="viewer-btn px-4 py-2 bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600 dark:hover:bg-slate-700 rounded-md text-sm font-medium transition-all">View Both</button>
-                                <button id="fullscreenBtn" class="viewer-btn px-4 py-2 bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-950 rounded-md text-sm font-medium transition-all">⛶ Fullscreen</button>
+                                <button id="viewBodyBtn" class="viewer-btn active px-4 py-2 bg-zinc-800 text-white dark:bg-zinc-700 rounded-md text-sm font-medium transition-all">View Body</button>
+                                <button id="viewLogosBtn" class="viewer-btn px-4 py-2 bg-white text-zinc-700 border border-zinc-200 hover:bg-zinc-50 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-600 dark:hover:bg-zinc-700 rounded-md text-sm font-medium transition-all">View Logos</button>
+                                <button id="viewBothBtn" class="viewer-btn px-4 py-2 bg-white text-zinc-700 border border-zinc-200 hover:bg-zinc-50 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-600 dark:hover:bg-zinc-700 rounded-md text-sm font-medium transition-all">View Both</button>
+                                <button id="fullscreenBtn" class="viewer-btn px-4 py-2 bg-zinc-100 text-zinc-700 border border-zinc-200 hover:bg-zinc-200 dark:bg-zinc-900 dark:text-zinc-300 dark:border-zinc-700 dark:hover:bg-zinc-950 rounded-md text-sm font-medium transition-all">⛶ Fullscreen</button>
                             </div>
                             
                             <!-- 3D Canvas -->
-                            <div id="viewerContainer" class="w-full bg-slate-900 dark:bg-black rounded-xl shadow-inner cursor-move border border-slate-800" style="height: 400px; max-height: 400px; overflow: hidden;"></div>
+                            <div id="viewerContainer" class="w-full bg-zinc-900 dark:bg-black rounded-xl shadow-inner cursor-move border border-zinc-800" style="height: 400px; max-height: 400px; overflow: hidden;"></div>
                             
-                            <p class="text-center text-sm text-slate-500 dark:text-slate-400 mt-4">
+                            <p class="text-center text-sm text-zinc-500 dark:text-zinc-400 mt-4">
                                 Click & drag to rotate • Scroll to zoom • Right-click to pan
                             </p>
                         </div>
@@ -265,14 +266,14 @@
 
                     <!-- Downloads Section -->
                     <div id="downloadsSection" class="hidden">
-                        <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-emerald-500/20 p-6">
+                        <div class="bg-white dark:bg-zinc-800 rounded-2xl shadow-sm border border-emerald-500/20 p-6">
                             <h3 class="text-xl font-bold text-emerald-700 dark:text-emerald-400 mb-4 text-center">Download Your Coaster</h3>
                             <div class="flex flex-col gap-3">
-                                <a href="#" id="downloadCoaster" class="w-full bg-slate-900 hover:bg-slate-800 dark:bg-emerald-600 dark:hover:bg-emerald-700 text-white font-medium py-3 px-6 rounded-xl shadow-sm text-center transition-all duration-200 hover:shadow-md active:scale-[0.98] flex items-center justify-center gap-2 text-lg">
+                                <a href="#" id="downloadCoaster" class="w-full bg-zinc-900 hover:bg-zinc-800 dark:bg-emerald-600 dark:hover:bg-emerald-700 text-white font-medium py-3 px-6 rounded-xl shadow-sm text-center transition-all duration-200 hover:shadow-md active:scale-[0.98] flex items-center justify-center gap-2 text-lg">
                                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                                     Download Coaster (3MF)
                                 </a>
-                                <p class="text-sm text-slate-500 dark:text-slate-400 text-center">
+                                <p class="text-sm text-zinc-500 dark:text-zinc-400 text-center">
                                     Contains body + logos with different colors. Compatible with OrcaSlicer, PrusaSlicer, Cura, and Bambu Studio.
                                 </p>
                             </div>
@@ -281,8 +282,8 @@
 
                     <!-- Error Section -->
                     <div id="errorSection" class="hidden">
-                        <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-red-500/20 p-6">
-                            <h3 class="text-xl font-bold text-slate-900 dark:text-white mb-2">Error</h3>
+                        <div class="bg-white dark:bg-zinc-800 rounded-2xl shadow-sm border border-red-500/20 p-6">
+                            <h3 class="text-xl font-bold text-zinc-900 dark:text-white mb-2">Error</h3>
                             <p id="errorMessage" class="text-red-600 dark:text-red-400"></p>
                             <button id="dismissErrorBtn" class="mt-4 bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-md transition-all duration-200 shadow-sm">
                                 Dismiss
@@ -297,8 +298,8 @@
     </div>
     
     <!-- Footer -->
-    <footer class="mt-12 border-t border-slate-200 dark:border-slate-800 py-8">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-sm text-slate-500 dark:text-slate-400">
+    <footer class="mt-12 border-t border-zinc-200 dark:border-zinc-800 py-8">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
             &copy; 2026 CoasterGen SaaS. All rights reserved.
         </div>
     </footer>
