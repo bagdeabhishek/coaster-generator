@@ -386,10 +386,10 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[origin.strip() for origin in ALLOWED_ORIGINS],
+    allow_origins=["*"],
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "X-Device-Fingerprint"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Security headers middleware
@@ -414,7 +414,7 @@ async def add_security_headers(request, call_next):
         "img-src 'self' blob: data:; "
         "connect-src 'self' https://api.bfl.ai https://auth.bfl.ai; "
         "font-src 'self' https://fonts.gstatic.com; "
-        "upgrade-insecure-requests"
+        # "upgrade-insecure-requests" disabled for local testing
     )
     return response
 
