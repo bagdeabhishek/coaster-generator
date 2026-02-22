@@ -74,6 +74,7 @@ MAX_POLLING_ATTEMPTS = 60
 POLLING_INTERVAL = 2
 
 # Security Configuration
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "production").lower()
 RATE_LIMIT_ENABLED = os.environ.get("RATE_LIMIT_ENABLED", "true").lower() == "true"
 RATE_LIMIT_COOLDOWN_HOURS = int(os.environ.get("RATE_LIMIT_COOLDOWN_HOURS", "168"))  # 1 week default
 ALLOW_BYPASS_WITH_API_KEY = os.environ.get("ALLOW_BYPASS_WITH_API_KEY", "true").lower() == "true"
@@ -384,12 +385,13 @@ app = FastAPI(
 )
 
 # Add CORS middleware
+is_dev = ENVIRONMENT == "development"
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"] if is_dev else [origin.strip() for origin in ALLOWED_ORIGINS],
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"] if is_dev else ["GET", "POST"],
+    allow_headers=["*"] if is_dev else ["Content-Type", "X-Device-Fingerprint"],
 )
 
 # Security headers middleware
@@ -403,7 +405,7 @@ async def add_security_headers(request, call_next):
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-    response.headers["Content-Security-Policy"] = (
+    csp_header = (
         "default-src 'self'; "
         "base-uri 'self'; "
         "object-src 'none'; "
@@ -414,8 +416,11 @@ async def add_security_headers(request, call_next):
         "img-src 'self' blob: data:; "
         "connect-src 'self' https://api.bfl.ai https://auth.bfl.ai; "
         "font-src 'self' https://fonts.gstatic.com; "
-        # "upgrade-insecure-requests" disabled for local testing
     )
+    if not is_dev:
+        csp_header += "upgrade-insecure-requests; "
+        
+    response.headers["Content-Security-Policy"] = csp_header
     return response
 
 # Setup templates and static files
