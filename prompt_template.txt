@@ -1,11 +1,9 @@
-A flat, high-contrast circular stamp emblem rendered like a bold black ink print on white paper.
+A minimalist Gestalt negative-space portrait logo that preserves the subject’s facial likeness, centered perfectly on a pure white background.
 
-The layout consists of two thick, solid black concentric rings forming a perfectly centered circle. The rings are uniform in width, heavy, and continuous, with no breaks or decorative variation. In the white band between the rings, the text “{{stamp_text}}” curves cleanly along the top arc in bold, uppercase sans-serif lettering. Each letter is simple, geometric, evenly spaced, and thick enough for embossing, with no thin strokes or stylistic flourishes.
-
-Inside the inner circle is a minimalist Gestalt negative-space portrait logo that preserves the subject’s facial likeness. The face is reduced to a small number of large, solid black shadow shapes and intentional white negative space. There are no outlines, no gradients, no textures, and no fine lines. The likeness is conveyed entirely through the placement and proportions of the black shadow masses around the eyes, nose, cheeks, and jaw, using strong figure–ground contrast and visual closure.
+The face is reduced to a small number of large, solid black shadow shapes and intentional white negative space. There are no outlines, no gradients, no textures, and no fine lines. The likeness is conveyed entirely through the placement and proportions of the black shadow masses around the eyes, nose, cheeks, and jaw, using strong figure–ground contrast and visual closure.
 
 The portrait avoids realism and detail, instead collapsing the face into bold, connected forms that imply the complete structure without explicitly drawing it. The eyes and facial proportions remain clearly recognizable, but only through shape relationships, not line work.
 
 The entire image is strictly black and white (#000000 and #FFFFFF only). All black regions are thick, continuous, and connected, with no isolated dots, hairline gaps, or fragile elements. The result resembles a vector stencil or linocut stamp designed for clean SVG tracing and 3D extrusion.
 
-Lighting is completely flat and neutral, with no depth, shading, highlights, or dimensional effects.
+Lighting is completely flat and neutral, with no depth, shading, highlights, or dimensional effects. The portrait should form a roughly circular cluster of shapes in the center of the canvas.

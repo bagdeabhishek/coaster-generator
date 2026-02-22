@@ -22,6 +22,8 @@ from dataclasses import dataclass, field, asdict
 import aiohttp
 import trimesh
 import vtracer
+from tools.add_coaster_border_and_text import composite_coaster_image
+import json
 from PIL import Image
 import numpy as np
 from shapely.geometry import Polygon
@@ -119,6 +121,7 @@ class Job:
             "created_at": self.created_at.isoformat(),
             "error": self.error,
             "preview_image_path": self.preview_image_path,
+            "original_image_path": self.original_image_path,
             "params": self.params.dict() if self.params else None,
             "api_key": self.api_key,
             "stamp_text": self.stamp_text
@@ -135,6 +138,7 @@ class Job:
             files=data.get("files", {}),
             error=data.get("error"),
             preview_image_path=data.get("preview_image_path"),
+            original_image_path=data.get("original_image_path"),
             api_key=data.get("api_key"),
             stamp_text=data.get("stamp_text", "Abhishek Does Stuff")
         )
@@ -592,7 +596,8 @@ async def bfl_flux_process(image_bytes: bytes, api_key: str, stamp_text: str = "
     # Set parameters based on BFL API documentation
     width = 512
     height = 512
-    seed = 432262096973491  # Same seed as ComfyUI workflow for reproducibility
+    import random
+    seed = random.randint(1, 999999999999999)  # Random seed so 'Regenerate' produces different results
     output_format = "png"  # Get PNG directly to avoid conversion issues
     
     payload = {
@@ -1195,8 +1200,12 @@ async def process_coaster_job(
         logger.info("STEP 1/2: Flattening image with BFL FLUX API...")
         await update_job_status(job_id, "processing_flatten", 50, "Flattening image with AI...")
         logger.info("Calling bfl_flux_process...")
-        flattened_image = await bfl_flux_process(image_bytes, api_key, stamp_text)
-        logger.info(f"✓ Flattening complete: {len(flattened_image)} bytes")
+        raw_portrait = await bfl_flux_process(image_bytes, api_key, stamp_text)
+        logger.info(f"✓ Flattening complete: {len(raw_portrait)} bytes")
+        
+        logger.info("Compositing portrait with coaster border and text...")
+        flattened_image = composite_coaster_image(raw_portrait, stamp_text)
+        logger.info(f"✓ Compositing complete: {len(flattened_image)} bytes")
         
         # Save preview image to disk for persistence across workers
         preview_path = JobStore.save_preview_image(job_id, flattened_image)
@@ -1389,7 +1398,14 @@ async def process_image(
 
     # Create job (don't store API key in job for security)
     job_id = str(uuid.uuid4())
-    job = Job(job_id=job_id, stamp_text=stamp_text)
+    
+    # Save original image for regeneration
+    original_image_path = os.path.join(TEMP_DIR, f"jobs/{job_id}_original.png")
+    os.makedirs(os.path.dirname(original_image_path), exist_ok=True)
+    with open(original_image_path, "wb") as f:
+        f.write(image_bytes)
+        
+    job = Job(job_id=job_id, stamp_text=stamp_text, original_image_path=original_image_path)
     JobStore.save_job(job)
     logger.info(f"✓ Job created: {job_id} with stamp: {stamp_text}")
 
@@ -1605,6 +1621,46 @@ async def retry_job(
     
     return {"job_id": job_id, "status": "processing", "message": "Restarting with new image..."}
 
+
+
+@app.post("/api/regenerate/{job_id}")
+async def regenerate_job(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    api_key: str = Form("")
+):
+    """Regenerate the BFL image using the same original upload and parameters."""
+    job = JobStore.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    if job.status != "review":
+        raise HTTPException(status_code=400, detail="Job is not in review state")
+        
+    if not job.original_image_path or not os.path.exists(job.original_image_path):
+        raise HTTPException(status_code=400, detail="Original image not found for this job")
+        
+    # Read original image bytes
+    with open(job.original_image_path, "rb") as f:
+        image_bytes = f.read()
+        
+    # Reset job state
+    job.status = "pending"
+    job.progress = 0
+    job.message = "Regenerating AI image..."
+    job.preview_image_path = None
+    job.error = None
+    JobStore.save_job(job)
+    
+    # Use provided API key or env var
+    effective_api_key = api_key if api_key else os.environ.get("BFL_API_KEY")
+    if not effective_api_key:
+        raise HTTPException(status_code=500, detail="No API key configured")
+        
+    # Start background processing again
+    background_tasks.add_task(process_coaster_job, job_id, image_bytes, job.params, job.stamp_text, effective_api_key)
+    
+    return {"job_id": job_id, "status": "processing", "message": "Regenerating image..."}
 
 @app.get("/", response_class=HTMLResponse)
 async def get_frontend(request: Request):
