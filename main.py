@@ -889,14 +889,49 @@ def generate_3d_coaster(
     polys = [p for p in polygons if not p.is_empty]
     polys_sorted = sorted(polys, key=lambda p: abs(p.area), reverse=True)
     
-    # Drop the largest polygon if it's acting as a solid background fill
-    if polys_sorted and len(polys_sorted) > 1:
-        max_area = abs(polys_sorted[0].area)
-        second_area = abs(polys_sorted[1].area)
-        # If the largest is significantly larger than the rest, it's likely a background
-        if max_area > second_area * 1.5:
-            logger.info(f"Dropping background polygon (area: {max_area})")
-            polys_sorted.pop(0)
+    # Drop only true canvas-sized background artifacts from tracing.
+    # The previous "drop largest polygon" heuristic can remove real face geometry.
+    if polys_sorted:
+        global_min_x = min(p.bounds[0] for p in polys_sorted)
+        global_min_y = min(p.bounds[1] for p in polys_sorted)
+        global_max_x = max(p.bounds[2] for p in polys_sorted)
+        global_max_y = max(p.bounds[3] for p in polys_sorted)
+        global_w = max(global_max_x - global_min_x, 1e-9)
+        global_h = max(global_max_y - global_min_y, 1e-9)
+
+        filtered_polys = []
+        dropped_count = 0
+        for poly in polys_sorted:
+            min_x, min_y, max_x, max_y = poly.bounds
+            poly_w = max_x - min_x
+            poly_h = max_y - min_y
+            bbox_area = max(poly_w * poly_h, 1e-9)
+            area_ratio_in_bbox = abs(poly.area) / bbox_area
+            coverage_x = poly_w / global_w
+            coverage_y = poly_h / global_h
+
+            # vtracer sometimes emits a canvas-sized ring/solid path that is not part
+            # of printable logo geometry.
+            is_canvas_sized = coverage_x >= 0.995 and coverage_y >= 0.995
+            is_ring_like = area_ratio_in_bbox < 0.20
+            is_solid_canvas = len(poly.interiors) == 0 and area_ratio_in_bbox > 0.85
+
+            if is_canvas_sized and (is_ring_like or is_solid_canvas):
+                dropped_count += 1
+                logger.info(
+                    "Dropping canvas-sized background polygon: "
+                    f"area={abs(poly.area):.2f}, "
+                    f"coverage=({coverage_x:.3f},{coverage_y:.3f}), "
+                    f"area_ratio={area_ratio_in_bbox:.3f}, "
+                    f"holes={len(poly.interiors)}"
+                )
+                continue
+
+            filtered_polys.append(poly)
+
+        polys_sorted = filtered_polys
+        if dropped_count:
+            logger.info(f"Dropped {dropped_count} background polygon(s)")
 
     # Subtraction logic to preserve holes
     used = [False] * len(polys_sorted)
