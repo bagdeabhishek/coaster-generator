@@ -86,7 +86,6 @@ const elements = {
     // Buttons
     approveBtn: document.getElementById('approveBtn'),
     retryBtn: document.getElementById('retryBtn'),
-    regenerateBtn: document.getElementById('regenerateBtn'),
     retryForm: document.getElementById('retryForm'),
     retryImageInput: document.getElementById('retryImageInput'),
     retrySubmitBtn: document.getElementById('retrySubmitBtn'),
@@ -278,7 +277,6 @@ function resetForm() {
     elements.approveBtn.textContent = 'Approve & Continue';
     elements.retrySubmitBtn.disabled = false;
     elements.retrySubmitBtn.textContent = 'Submit New Image';
-    if(elements.regenerateBtn) { elements.regenerateBtn.disabled = false; elements.regenerateBtn.textContent = 'Regenerate AI'; }
 }
 
 // ============================================
@@ -359,7 +357,6 @@ elements.approveBtn.addEventListener('click', async function() {
     
     this.disabled = true;
     elements.retryBtn.disabled = true;
-    if(elements.regenerateBtn) elements.regenerateBtn.disabled = true;
     this.innerHTML = '<span class="animate-spin inline-block mr-2">⟳</span> Processing...';
     
     try {
@@ -383,7 +380,6 @@ elements.approveBtn.addEventListener('click', async function() {
         showError(error.message);
         this.disabled = false;
         elements.retryBtn.disabled = false;
-    if(elements.regenerateBtn) elements.regenerateBtn.disabled = false;
         this.textContent = 'Approve & Continue';
     }
 });
@@ -765,41 +761,4 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
 } else {
     init();
-}
-
-
-// Regenerate button
-if (elements.regenerateBtn) {
-    elements.regenerateBtn.addEventListener('click', async function() {
-        if (!currentJobId) return;
-        
-        this.disabled = true;
-        elements.approveBtn.disabled = true;
-        elements.retryBtn.disabled = true;
-    if(elements.regenerateBtn) elements.regenerateBtn.disabled = true;
-        this.innerHTML = '<span class="animate-spin inline-block mr-2">⟳</span> Regenerating...';
-        
-        try {
-            const response = await fetch(`/api/regenerate/${currentJobId}`, {
-                method: 'POST'
-            });
-            
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || 'Failed to regenerate');
-            }
-            
-            elements.reviewSection.classList.add('hidden');
-            elements.progressSection.classList.remove('hidden');
-            
-            startPolling(currentJobId);
-            
-        } catch (error) {
-            showError(error.message);
-            this.disabled = false;
-            elements.approveBtn.disabled = false;
-            elements.retryBtn.disabled = false;
-            this.textContent = 'Regenerate AI';
-        }
-    });
 }
