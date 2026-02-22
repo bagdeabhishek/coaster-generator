@@ -408,7 +408,7 @@ async def add_security_headers(request, call_next):
         "frame-ancestors 'none'; "
         "form-action 'self'; "
         "script-src 'self' 'unsafe-inline' cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com threejs.org; "
-        "style-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "img-src 'self' blob: data:; "
         "connect-src 'self' https://api.bfl.ai https://auth.bfl.ai; "
         "font-src 'self' https://fonts.gstatic.com; "
