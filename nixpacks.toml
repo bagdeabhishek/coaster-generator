@@ -1,7 +1,6 @@
 [start]
-# Temporarily using 2 workers for debugging. Increase to $(nproc) after memory issues resolved.
-# Each worker uses ~200-400MB RAM due to ML libraries (trimesh, vtracer, etc.)
-cmd = "gunicorn -k uvicorn.workers.UvicornWorker -b 0.0.0.0:3000 --workers 2 --worker-connections 1000 --max-requests 1000 --max-requests-jitter 100 --timeout 300 --keep-alive 5 --forwarded-allow-ips '*' main:app"
+# Auto-scale workers to available CPU cores.
+cmd = "gunicorn -k uvicorn.workers.UvicornWorker -b 0.0.0.0:3000 --workers $(nproc) --worker-connections 1000 --max-requests 1000 --max-requests-jitter 100 --timeout 300 --keep-alive 5 --forwarded-allow-ips '*' main:app"
 
 [build]
 builder = "nixpacks"
