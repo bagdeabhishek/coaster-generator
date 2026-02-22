@@ -71,6 +71,7 @@ const elements = {
     moonIcon: document.getElementById('moonIcon'),
     
     // Sections
+    emptyState: document.getElementById('emptyState'),
     progressSection: document.getElementById('progressSection'),
     progressBar: document.getElementById('progressBar'),
     progressPercent: document.getElementById('progressPercent'),
@@ -189,6 +190,7 @@ function initForm() {
     
     elements.dismissErrorBtn.addEventListener('click', () => {
         elements.errorSection.classList.add('hidden');
+        if(elements.emptyState) elements.emptyState.classList.remove('hidden');
     });
 }
 
@@ -218,6 +220,15 @@ async function handleSubmit() {
     // Show loading state
     elements.generateBtn.disabled = true;
     elements.generateBtnText.textContent = 'Processing...';
+    
+    // Hide ALL right pane content
+    if(elements.emptyState) elements.emptyState.classList.add('hidden');
+    elements.reviewSection.classList.add('hidden');
+    elements.viewerSection.classList.add('hidden');
+    elements.downloadsSection.classList.add('hidden');
+    elements.errorSection.classList.add('hidden');
+    
+    // Show just progress
     elements.progressSection.classList.remove('hidden');
     
     try {
@@ -249,7 +260,6 @@ async function handleSubmit() {
         
     } catch (error) {
         showError(error.message);
-        resetForm();
     }
 }
 
@@ -320,7 +330,6 @@ async function pollStatus(jobId) {
         } else if (data.status === 'failed') {
             clearInterval(pollingInterval);
             showError(data.error || 'Processing failed');
-            resetForm();
         }
         
     } catch (error) {
@@ -371,6 +380,9 @@ elements.approveBtn.addEventListener('click', async function() {
         
         // Hide review and show progress
         elements.reviewSection.classList.add('hidden');
+        elements.viewerSection.classList.add('hidden');
+        elements.downloadsSection.classList.add('hidden');
+        if(elements.emptyState) elements.emptyState.classList.add('hidden');
         elements.progressSection.classList.remove('hidden');
         
         // Continue polling
@@ -419,6 +431,9 @@ elements.retrySubmitBtn.addEventListener('click', async function() {
         
         // Hide review and show progress
         elements.reviewSection.classList.add('hidden');
+        elements.viewerSection.classList.add('hidden');
+        elements.downloadsSection.classList.add('hidden');
+        if(elements.emptyState) elements.emptyState.classList.add('hidden');
         elements.progressSection.classList.remove('hidden');
         
         // Continue polling
@@ -627,6 +642,7 @@ function loadSTL(url, material) {
 
 async function show3DViewer(urls) {
     downloadUrls = urls;
+    if(elements.emptyState) elements.emptyState.classList.add('hidden');
     elements.progressSection.classList.add('hidden');
     elements.viewerSection.classList.remove('hidden');
     elements.viewerSection.classList.add('animate-fade-in');
@@ -737,11 +753,16 @@ function setActiveViewerButton(btn) {
 // ============================================
 
 function showError(message) {
+    if(elements.emptyState) elements.emptyState.classList.add('hidden');
     elements.progressSection.classList.add('hidden');
     elements.reviewSection.classList.add('hidden');
+    elements.viewerSection.classList.add('hidden');
+    elements.downloadsSection.classList.add('hidden');
     elements.errorSection.classList.remove('hidden');
-    elements.errorSection.classList.add('animate-fade-in');
     elements.errorMessage.textContent = message;
+    
+    elements.generateBtn.disabled = false;
+    elements.generateBtnText.textContent = 'Generate 3D Coaster';
 }
 
 // ============================================
@@ -761,4 +782,16 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
 } else {
     init();
+}
+
+// Advanced Settings Toggle
+const advancedToggleBtn = document.getElementById('advancedToggleBtn');
+const advancedContent = document.getElementById('advancedContent');
+const advancedChevron = document.getElementById('advancedChevron');
+
+if (advancedToggleBtn) {
+    advancedToggleBtn.addEventListener('click', () => {
+        advancedContent.classList.toggle('hidden');
+        advancedChevron.classList.toggle('rotate-180');
+    });
 }
