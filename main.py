@@ -3,6 +3,13 @@
 FastAPI backend with async job processing for converting images to 3D printable coasters.
 """
 
+import socket
+# Fix for Docker/LXC environments with broken IPv6 causing httpx/authlib ConnectErrors
+_original_getaddrinfo = socket.getaddrinfo
+def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    return _original_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+socket.getaddrinfo = _ipv4_only_getaddrinfo
+
 import os
 import io
 import base64
