@@ -3,13 +3,6 @@
 FastAPI backend with async job processing for converting images to 3D printable coasters.
 """
 
-import socket
-# Fix for Docker/LXC environments with broken IPv6 causing httpx/authlib ConnectErrors
-_original_getaddrinfo = socket.getaddrinfo
-def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-    return _original_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
-socket.getaddrinfo = _ipv4_only_getaddrinfo
-
 import os
 import io
 import base64
@@ -504,22 +497,12 @@ if SESSION_SECRET:
 oauth = OAuth()
 enabled_providers = []
 if OAUTH_GOOGLE_CLIENT_ID and OAUTH_GOOGLE_CLIENT_SECRET:
-    # Explicitly configure httpx client to only use IPv4
-    # This prevents the "All connection attempts failed" error in IPv6-broken containers
-    import httpx
-    
-    # We create a custom transport that enforces local address family to AF_INET
-    transport = httpx.AsyncHTTPTransport(local_address="0.0.0.0")
-    client = httpx.AsyncClient(transport=transport)
-    
     oauth.register(
         name="google",
         client_id=OAUTH_GOOGLE_CLIENT_ID,
         client_secret=OAUTH_GOOGLE_CLIENT_SECRET,
         server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-        client_kwargs={"scope": "openid email profile"},
-        # Inject the custom IPv4-only client into Authlib
-        client=client
+        client_kwargs={"scope": "openid email profile"}
     )
     enabled_providers.append("google")
     logger.info("Google OAuth registered")
