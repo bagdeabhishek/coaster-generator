@@ -1,6 +1,8 @@
 [start]
-# Auto-scale workers to available CPU cores.
-cmd = "gunicorn -k uvicorn.workers.UvicornWorker -b 0.0.0.0:3000 --workers $(nproc) --worker-connections 1000 --max-requests 1000 --max-requests-jitter 100 --timeout 300 --keep-alive 5 --forwarded-allow-ips '*' main:app"
+# We use exactly 2 Uvicorn workers for the web routing and API layer.
+# The heavy 3D math is handled by the ProcessPoolExecutor running 4 max_workers (bursting to Modal if full).
+# This perfectly utilizes the 6 cores of the i5-8500T.
+cmd = "gunicorn -k uvicorn.workers.UvicornWorker -b 0.0.0.0:3000 --workers 2 --worker-connections 1000 --max-requests 1000 --max-requests-jitter 100 --timeout 300 --keep-alive 5 --forwarded-allow-ips '*' main:app"
 
 [build]
 builder = "nixpacks"
@@ -8,6 +10,7 @@ builder = "nixpacks"
 [environment]
 DEBUG = "false"
 PYTHONUNBUFFERED = "1"
-TEMP_DIR = "./temp"
+TEMP_DIR = "/app/temp"
 MAX_WORKERS = "auto"
 LOG_LEVEL = "INFO"
+USE_MODAL_FALLBACK = "true"

@@ -35,7 +35,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from pydantic import BaseModel
+import concurrent.futures
 
 # Auth and billing
 from auth_quota_store import (
@@ -269,9 +271,11 @@ class JobStore:
     
     @classmethod
     def cleanup_old_jobs(cls, max_age_hours: int = 24) -> None:
-        """Clean up job files older than specified hours."""
+        """Clean up job files and generated 3MF/STL files older than specified hours."""
         try:
             now = datetime.now()
+            
+            # Clean up JSON and preview files in jobs dir
             for filename in os.listdir(JOBS_DIR):
                 if filename.endswith('.json') or filename.endswith('_preview.png'):
                     filepath = os.path.join(JOBS_DIR, filename)
@@ -281,6 +285,20 @@ class JobStore:
                     if age_hours > max_age_hours:
                         os.remove(filepath)
                         logger.info(f"Cleaned up old job file: {filename}")
+                        
+            # Clean up generated 3MF, STL, SVG, PNG files in temp dir
+            # (skip database files)
+            for filename in os.listdir(TEMP_DIR):
+                if filename.endswith(('.3mf', '.stl', '.svg', '.png')) and not filename.endswith('_preview.png'):
+                    filepath = os.path.join(TEMP_DIR, filename)
+                    # Exclude directories
+                    if os.path.isfile(filepath):
+                        file_time = datetime.fromtimestamp(os.path.getmtime(filepath))
+                        age_hours = (now - file_time).total_seconds() / 3600
+                        
+                        if age_hours > max_age_hours:
+                            os.remove(filepath)
+                            logger.info(f"Cleaned up old generated file: {filename}")
         except Exception as e:
             logger.error(f"Error during job cleanup: {e}")
 
@@ -423,6 +441,24 @@ if RATE_LIMIT_ENABLED and LEGACY_RATE_LIMIT_ENABLED:
 # Initialize database
 init_db()
 
+# Initialize Local Processing Pool
+MAX_LOCAL_WORKERS = 4
+process_pool = concurrent.futures.ProcessPoolExecutor(max_workers=MAX_LOCAL_WORKERS)
+active_local_tasks = 0
+tasks_lock = asyncio.Lock()
+
+# Initialize Modal (optional fallback)
+MODAL_APP_NAME = "coaster-generator"
+USE_MODAL_FALLBACK = os.environ.get("USE_MODAL_FALLBACK", "true").lower() == "true"
+if USE_MODAL_FALLBACK:
+    try:
+        import modal
+        # We don't deploy here, just prepare to lookup the function later
+        logger.info("Modal fallback enabled for burst traffic")
+    except ImportError:
+        logger.warning("Modal library not installed. Disabling burst to cloud.")
+        USE_MODAL_FALLBACK = False
+
 # Initialize FastAPI app with optimized settings
 app = FastAPI(
     title="3D Coaster Generator",
@@ -440,6 +476,9 @@ app.add_middleware(
     allow_methods=["*"] if is_dev else ["GET", "POST"],
     allow_headers=["*"] if is_dev else ["Content-Type", "X-Device-Fingerprint"],
 )
+
+# Add Proxy headers middleware for correct IP/Scheme behind reverse proxies (like Coolify/Traefik)
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 # Add session middleware
 if SESSION_SECRET:
@@ -1571,6 +1610,19 @@ async def process_coaster_job(
             job.error = str(e)
             JobStore.save_job(job)
 
+def run_3d_processing_pipeline(flattened_image: Image.Image, params: ProcessRequest, job_id: str):
+    """
+    Pure synchronous function that runs the heavy CPU bounds tasks.
+    Suitable for running inside a ProcessPoolExecutor.
+    """
+    # Step 1: Vectorize
+    svg_string = vectorize_image(flattened_image)
+    
+    # Step 2: Generate 3D
+    coaster_3mf_path, body_stl_path, logos_stl_path = generate_3d_coaster(svg_string, params, job_id)
+    
+    return coaster_3mf_path, body_stl_path, logos_stl_path
+
 
 async def process_vectorization_3d(job_id: str):
     """
@@ -1579,6 +1631,7 @@ async def process_vectorization_3d(job_id: str):
     Args:
         job_id: Job identifier
     """
+    global active_local_tasks
     logger.info("="*60)
     logger.info(f"PHASE 2 STARTED - Job ID: {job_id}")
     
@@ -1590,23 +1643,80 @@ async def process_vectorization_3d(job_id: str):
         # Load preview image from disk
         flattened_image = JobStore.get_preview_image(job_id)
         params = job.params
+        stamp_text = job.stamp_text or "Abhishek Does Stuff"
         
         if not flattened_image or not params:
             raise Exception("Missing preview image or parameters")
+            
+        await update_job_status(job_id, "processing_3d", 75, "Starting 3D generation...")
         
-        # Step 2: Vectorize
-        logger.info("STEP 2/2: Converting to vector (SVG)...")
-        await update_job_status(job_id, "processing_vectorize", 75, "Converting to vector...")
-        logger.info("Calling vectorize_image...")
-        svg_string = vectorize_image(flattened_image)
-        logger.info(f"✓ Vectorization complete: {len(svg_string)} chars")
+        # Check active local tasks to decide routing
+        async with tasks_lock:
+            current_active = active_local_tasks
+            if current_active < MAX_LOCAL_WORKERS:
+                active_local_tasks += 1
+                route_to_modal = False
+            else:
+                route_to_modal = True
+                
+        try:
+            if route_to_modal and USE_MODAL_FALLBACK:
+                logger.info("ROUTING TO CLOUD: Local pool full, bursting to Modal...")
+                await update_job_status(job_id, "processing_3d", 80, "Generating on cloud GPU/CPU...")
+                
+                # Convert image to bytes to send over wire
+                img_byte_arr = io.BytesIO()
+                flattened_image.save(img_byte_arr, format='PNG')
+                img_bytes = img_byte_arr.getvalue()
+                
+                # Call Modal function synchronously (it's network IO bound from our perspective)
+                loop = asyncio.get_running_loop()
+                modal_func = modal.Function.lookup(MODAL_APP_NAME, "generate_3d_coaster")
+                combined_bytes, body_bytes, logos_bytes = await loop.run_in_executor(
+                    None, 
+                    modal_func.remote, 
+                    img_bytes, 
+                    asdict(params), 
+                    stamp_text
+                )
+                
+                # Save received bytes to local disk
+                timestamp = datetime.now().strftime("%H%M%S")
+                base_name = f"{job_id}_{timestamp}"
+                
+                coaster_3mf_path = os.path.join(TEMP_DIR, f"{base_name}_coaster.3mf")
+                body_stl_path = os.path.join(TEMP_DIR, f"{base_name}_Body.stl")
+                logos_stl_path = os.path.join(TEMP_DIR, f"{base_name}_Logos.stl")
+                
+                with open(coaster_3mf_path, "wb") as f: f.write(combined_bytes)
+                with open(body_stl_path, "wb") as f: f.write(body_bytes)
+                with open(logos_stl_path, "wb") as f: f.write(logos_bytes)
+                
+                logger.info(f"✓ Cloud 3D generation complete via Modal")
+                
+            else:
+                if route_to_modal:
+                    logger.warning("ROUTING LOCALLY: Local pool full, but Modal fallback disabled. Queuing locally...")
+                else:
+                    logger.info("ROUTING LOCALLY: Processing on M900 Tiny...")
+                    
+                await update_job_status(job_id, "processing_3d", 85, "Generating 3D model locally...")
+                
+                # Run the heavy CPU math in the local ProcessPoolExecutor
+                loop = asyncio.get_running_loop()
+                coaster_3mf_path, body_stl_path, logos_stl_path = await loop.run_in_executor(
+                    process_pool,
+                    run_3d_processing_pipeline,
+                    flattened_image,
+                    params,
+                    job_id
+                )
+                logger.info(f"✓ Local 3D generation complete")
+        finally:
+            if not route_to_modal or not USE_MODAL_FALLBACK:
+                async with tasks_lock:
+                    active_local_tasks -= 1
         
-        # Step 3: Generate 3D
-        logger.info("STEP 2/2: Generating 3D model...")
-        await update_job_status(job_id, "processing_3d", 90, "Generating 3D model...")
-        logger.info("Calling generate_3d_coaster...")
-        coaster_3mf_path, body_stl_path, logos_stl_path = generate_3d_coaster(svg_string, params, job_id)
-        logger.info(f"✓ 3D generation complete")
         logger.info(f"  - 3MF: {coaster_3mf_path}")
         logger.info(f"  - Body STL: {body_stl_path}")
         logger.info(f"  - Logos STL: {logos_stl_path}")
