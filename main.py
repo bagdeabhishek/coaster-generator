@@ -606,10 +606,16 @@ async def login_google(request: Request):
     if "google" not in enabled_providers:
         raise HTTPException(status_code=404, detail="Google login is not configured")
 
-    return await oauth.google.authorize_redirect(
-        request,
-        f"{PUBLIC_BASE_URL}/auth/callback/google",
-    )
+    try:
+        return await oauth.google.authorize_redirect(
+            request,
+            f"{PUBLIC_BASE_URL}/auth/callback/google",
+        )
+    except Exception as e:
+        logger.error(f"OAuth redirect FAILED: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(f"Full traceback:\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"OAuth error: {type(e).__name__}")
 
 
 @app.get("/auth/callback/google")
