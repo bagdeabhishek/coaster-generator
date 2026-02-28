@@ -46,6 +46,9 @@ let controls = null;
 let stlLoader = null;
 let currentMeshes = [];
 let downloadUrls = null;
+let authState = { authenticated: false, user: null };
+let enabledProviders = [];
+let usageState = null;
 
 // DOM Elements
 const elements = {
@@ -69,6 +72,16 @@ const elements = {
     darkModeToggle: document.getElementById('darkModeToggle'),
     sunIcon: document.getElementById('sunIcon'),
     moonIcon: document.getElementById('moonIcon'),
+
+    // Auth / usage
+    loginGoogleBtn: document.getElementById('loginGoogleBtn'),
+    authUserWrap: document.getElementById('authUserWrap'),
+    authAvatar: document.getElementById('authAvatar'),
+    authUserName: document.getElementById('authUserName'),
+    logoutBtn: document.getElementById('logoutBtn'),
+    usageSummary: document.getElementById('usageSummary'),
+    usageDetails: document.getElementById('usageDetails'),
+    upgradeBtn: document.getElementById('upgradeBtn'),
     
     // Sections
     emptyState: document.getElementById('emptyState'),
@@ -119,6 +132,173 @@ function initDarkMode() {
         }
         updateDarkModeIcons();
     });
+}
+
+// ============================================
+// Auth + Usage
+// ============================================
+
+async function initAuthAndUsage() {
+    if (elements.loginGoogleBtn) {
+        elements.loginGoogleBtn.addEventListener('click', () => {
+            window.location.href = '/auth/login/google';
+        });
+    }
+
+    if (elements.logoutBtn) {
+        elements.logoutBtn.addEventListener('click', async () => {
+            try {
+                await fetch('/api/auth/logout', { method: 'POST' });
+            } catch (_) {
+                // ignore logout network errors
+            }
+            authState = { authenticated: false, user: null };
+            renderAuth();
+            await refreshUsage();
+        });
+    }
+
+    if (elements.upgradeBtn) {
+        elements.upgradeBtn.addEventListener('click', async () => {
+            try {
+                const response = await fetch('/api/billing/checkout', { method: 'POST' });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.detail || data.message || 'Unable to start checkout');
+                }
+                const checkoutUrl = data.checkout_url || data.url;
+                if (!checkoutUrl) {
+                    throw new Error('Checkout URL missing in response');
+                }
+                window.location.href = checkoutUrl;
+            } catch (error) {
+                showError(error.message || 'Unable to start checkout');
+            }
+        });
+    }
+
+    await Promise.all([loadAuthProviders(), loadAuthState()]);
+    renderAuth();
+    await refreshUsage();
+}
+
+async function loadAuthProviders() {
+    try {
+        const response = await fetch('/api/auth/providers');
+        const data = await response.json();
+        enabledProviders = Array.isArray(data.providers) ? data.providers : [];
+    } catch (_) {
+        enabledProviders = [];
+    }
+}
+
+async function loadAuthState() {
+    try {
+        const response = await fetch('/api/auth/me');
+        const data = await response.json();
+        authState = {
+            authenticated: Boolean(data.authenticated),
+            user: data.user || null,
+        };
+    } catch (_) {
+        authState = { authenticated: false, user: null };
+    }
+}
+
+function renderAuth() {
+    const googleAvailable = enabledProviders.includes('google');
+
+    if (elements.loginGoogleBtn) {
+        if (!authState.authenticated && googleAvailable) {
+            elements.loginGoogleBtn.classList.remove('hidden');
+        } else {
+            elements.loginGoogleBtn.classList.add('hidden');
+        }
+    }
+
+    if (elements.authUserWrap) {
+        if (authState.authenticated && authState.user) {
+            elements.authUserWrap.classList.remove('hidden');
+            elements.authUserWrap.classList.add('flex');
+            if (elements.authUserName) {
+                elements.authUserName.textContent = authState.user.name || authState.user.email || 'Signed in';
+            }
+            if (elements.authAvatar) {
+                const avatar = authState.user.avatar_url;
+                if (avatar) {
+                    elements.authAvatar.src = avatar;
+                    elements.authAvatar.classList.remove('hidden');
+                } else {
+                    elements.authAvatar.classList.add('hidden');
+                }
+            }
+        } else {
+            elements.authUserWrap.classList.add('hidden');
+            elements.authUserWrap.classList.remove('flex');
+        }
+    }
+}
+
+async function refreshUsage() {
+    try {
+        const response = await fetch('/api/usage', {
+            headers: {
+                'X-Device-Fingerprint': getDeviceFingerprint(),
+            },
+        });
+        const data = await response.json();
+        usageState = data;
+        renderUsage(data);
+    } catch (_) {
+        if (elements.usageSummary) {
+            elements.usageSummary.textContent = 'Unable to load usage right now.';
+        }
+        if (elements.usageDetails) {
+            elements.usageDetails.textContent = 'Try refreshing the page.';
+        }
+    }
+}
+
+function renderUsage(data) {
+    if (!elements.usageSummary || !elements.usageDetails || !elements.upgradeBtn) return;
+
+    const authenticated = Boolean(data.authenticated);
+    const tier = data.tier || 'free';
+    const nextAction = data.next_action || null;
+
+    if (!authenticated) {
+        const remaining = Number(data.remaining_anon || 0);
+        elements.usageSummary.textContent = `Anonymous plan: ${remaining} free generation${remaining === 1 ? '' : 's'} left`;
+    } else if (tier === 'paid') {
+        const remaining = Number(data.paid_remaining || 0);
+        elements.usageSummary.textContent = `Paid plan: ${remaining} generation${remaining === 1 ? '' : 's'} left this cycle`;
+    } else {
+        const remaining = Number(data.remaining_login_bonus || 0);
+        elements.usageSummary.textContent = `Signed-in free bonus: ${remaining} generation${remaining === 1 ? '' : 's'} left`;
+    }
+
+    const detailParts = [];
+    if (typeof data.remaining_anon === 'number') {
+        detailParts.push(`Anon left: ${Math.max(0, data.remaining_anon)}`);
+    }
+    if (typeof data.remaining_login_bonus === 'number') {
+        detailParts.push(`Login bonus left: ${Math.max(0, data.remaining_login_bonus)}`);
+    }
+    if (tier === 'paid') {
+        detailParts.push(`Used this cycle: ${data.paid_used || 0}/${data.paid_limit || 0}`);
+    }
+    if (data.message) {
+        detailParts.push(data.message);
+    }
+
+    elements.usageDetails.textContent = detailParts.join(' • ');
+
+    const showUpgrade = authenticated && nextAction === 'upgrade';
+    if (showUpgrade) {
+        elements.upgradeBtn.classList.remove('hidden');
+    } else {
+        elements.upgradeBtn.classList.add('hidden');
+    }
 }
 
 function updateDarkModeIcons() {
@@ -241,10 +421,14 @@ async function handleSubmit() {
         });
         
         if (!response.ok) {
-            const errorData = await response.json();
+            const errorData = await response.json().catch(() => ({}));
             // Handle rate limit errors specially
             if (response.status === 429) {
                 const error = errorData.detail || errorData;
+                if (error.error === 'quota_exceeded') {
+                    await refreshUsage();
+                    throw new Error(error.message || 'You have reached your generation limit.');
+                }
                 const hours = Math.ceil((error.retry_after || 0) / 3600);
                 const message = error.message || 'Rate limit exceeded';
                 throw new Error(`${message}\n\nYou can bypass this limit by using your own BFL API key.`);
@@ -254,6 +438,7 @@ async function handleSubmit() {
         
         const data = await response.json();
         currentJobId = data.job_id;
+        await refreshUsage();
         
         // Start polling
         startPolling(currentJobId);
@@ -421,13 +606,23 @@ elements.retrySubmitBtn.addEventListener('click', async function() {
     try {
         const response = await fetch(`/api/retry/${currentJobId}`, {
             method: 'POST',
+            headers: {
+                'X-Device-Fingerprint': getDeviceFingerprint(),
+            },
             body: formData
         });
         
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Failed to retry');
+            const errorData = await response.json().catch(() => ({}));
+            if (response.status === 429) {
+                const error = errorData.detail || errorData;
+                await refreshUsage();
+                throw new Error(error.message || 'You have reached your generation limit.');
+            }
+            throw new Error(errorData.detail || 'Failed to retry');
         }
+
+        await refreshUsage();
         
         // Hide review and show progress
         elements.reviewSection.classList.add('hidden');
@@ -773,6 +968,7 @@ function init() {
     initDarkMode();
     initFileUpload();
     initForm();
+    initAuthAndUsage();
     
     // Initialized
 }

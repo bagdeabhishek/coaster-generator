@@ -59,10 +59,24 @@
                 <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-white font-bold text-xl shadow-lg shadow-primary-500/40 border border-primary-400/20">C</div>
                 <span class="font-bold text-xl tracking-tight text-zinc-900 dark:text-white">Coaster<span class="text-primary-600 dark:text-primary-400">Gen</span></span>
             </div>
-            <button id="darkModeToggle" class="p-2 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors" aria-label="Toggle dark mode">
-                <svg id="sunIcon" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
-                <svg id="moonIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
-            </button>
+            <div class="flex items-center gap-3">
+                <div id="authSection" class="flex items-center gap-2">
+                    <button id="loginGoogleBtn" class="hidden px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors">
+                        Sign in with Google
+                    </button>
+                    <div id="authUserWrap" class="hidden items-center gap-2">
+                        <img id="authAvatar" src="" alt="User avatar" class="w-8 h-8 rounded-full border border-zinc-300 dark:border-zinc-600">
+                        <span id="authUserName" class="text-sm font-medium text-zinc-700 dark:text-zinc-200 max-w-[120px] truncate"></span>
+                        <button id="logoutBtn" class="px-2.5 py-1.5 rounded-md text-xs font-medium border border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors">
+                            Logout
+                        </button>
+                    </div>
+                </div>
+                <button id="darkModeToggle" class="p-2 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 transition-colors" aria-label="Toggle dark mode">
+                    <svg id="sunIcon" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                    <svg id="moonIcon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+                </button>
+            </div>
         </div>
     </nav>
 
@@ -178,6 +192,19 @@
                             <p class="text-sm text-zinc-600 dark:text-zinc-400">
                                 <strong class="text-zinc-900 dark:text-zinc-200">How it works:</strong> Upload an image and we'll generate a 3D coaster using AI. You'll review the AI-generated design before we create the 3D model.
                             </p>
+                        </div>
+
+                        <!-- Usage & Plan -->
+                        <div id="usageCard" class="bg-amber-50/70 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/50 rounded-xl p-4">
+                            <h3 class="text-sm font-semibold text-amber-900 dark:text-amber-300 mb-2">Usage & Plan</h3>
+                            <p class="text-xs text-amber-800 dark:text-amber-200 mb-2">
+                                1 free generation without login. Sign in to unlock 2 more free generations. Upgrade for higher monthly limits.
+                            </p>
+                            <p id="usageSummary" class="text-sm font-medium text-zinc-700 dark:text-zinc-200 mb-3">Checking usage...</p>
+                            <p id="usageDetails" class="text-xs text-zinc-500 dark:text-zinc-400 mb-3"></p>
+                            <button id="upgradeBtn" class="hidden w-full bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium py-2 px-4 rounded-md transition-colors">
+                                Upgrade Plan
+                            </button>
                         </div>
                         
                         <div class="pt-2">

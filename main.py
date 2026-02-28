@@ -30,16 +30,37 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 from fastapi import FastAPI, File, UploadFile, Form, BackgroundTasks, HTTPException, Request, Header
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 from pydantic import BaseModel
+
+# Auth and billing
+from auth_quota_store import (
+    init_db,
+    create_user,
+    get_user_by_email,
+    get_user_by_id,
+    get_user_by_oauth,
+    link_oauth_identity,
+    set_subscription,
+    record_webhook,
+    is_webhook_processed,
+)
+from quota_service import check_quota, consume_quota, PAID_MONTHLY_LIMIT
 
 # Security imports
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+
+# OAuth
+from authlib.integrations.starlette_client import OAuth
+
+# Billing
+from dodopayments import DodoPayments
 
 # Debug flag - read from environment variable (default to False for production)
 DEBUG_NO_CLEANUP = os.environ.get("DEBUG_NO_CLEANUP", "false").lower() in ("true", "1", "yes")
@@ -76,6 +97,7 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "production").lower()
 RATE_LIMIT_ENABLED = os.environ.get("RATE_LIMIT_ENABLED", "true").lower() == "true"
 RATE_LIMIT_COOLDOWN_HOURS = int(os.environ.get("RATE_LIMIT_COOLDOWN_HOURS", "168"))  # 1 week default
 ALLOW_BYPASS_WITH_API_KEY = os.environ.get("ALLOW_BYPASS_WITH_API_KEY", "true").lower() == "true"
+LEGACY_RATE_LIMIT_ENABLED = os.environ.get("LEGACY_RATE_LIMIT_ENABLED", "false").lower() == "true"
 MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "10"))
 ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
 
@@ -83,6 +105,32 @@ logger.info(f"TEMP_DIR: {TEMP_DIR}")
 logger.info(f"BFL_API_URL: {BFL_API_URL}")
 logger.info(f"Rate limiting: {RATE_LIMIT_ENABLED} ({RATE_LIMIT_COOLDOWN_HOURS}h cooldown)")
 logger.info(f"Bypass with API key: {ALLOW_BYPASS_WITH_API_KEY}")
+logger.info(f"Legacy weekly limiter enabled: {LEGACY_RATE_LIMIT_ENABLED}")
+
+# Auth Configuration
+SESSION_SECRET = os.environ.get("SESSION_SECRET", "")
+if not SESSION_SECRET:
+    if ENVIRONMENT == "production":
+        logger.error("SESSION_SECRET is not set! Generating a random one (not secure for production).")
+    else:
+        logger.warning("SESSION_SECRET is not set; generating a temporary development secret.")
+    SESSION_SECRET = uuid.uuid4().hex
+
+OAUTH_GOOGLE_CLIENT_ID = os.environ.get("OAUTH_GOOGLE_CLIENT_ID", "")
+OAUTH_GOOGLE_CLIENT_SECRET = os.environ.get("OAUTH_GOOGLE_CLIENT_SECRET", "")
+
+# Billing Configuration
+DODO_API_KEY = os.environ.get("DODO_PAYMENTS_API_KEY", "")
+DODO_ENV = os.environ.get("DODO_PAYMENTS_ENVIRONMENT", "test_mode")
+DODO_WEBHOOK_KEY = os.environ.get("DODO_PAYMENTS_WEBHOOK_KEY", "")
+DODO_SUBSCRIPTION_PRODUCT_ID = os.environ.get("DODO_SUBSCRIPTION_PRODUCT_ID", "")
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:3000")
+if PUBLIC_BASE_URL.endswith("/"):
+    PUBLIC_BASE_URL = PUBLIC_BASE_URL[:-1]
+
+logger.info(f"Session enabled: {bool(SESSION_SECRET)}")
+logger.info(f"Google OAuth enabled: {bool(OAUTH_GOOGLE_CLIENT_ID)}")
+logger.info(f"Dodo Payments enabled: {bool(DODO_API_KEY)}")
 
 # Ensure temp directory exists
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -365,12 +413,15 @@ def get_rate_limit_key(request: Request) -> str:
 
 # Initialize file-based rate limiter (persists across restarts)
 rate_limiter = None
-if RATE_LIMIT_ENABLED:
+if RATE_LIMIT_ENABLED and LEGACY_RATE_LIMIT_ENABLED:
     rate_limiter = FileBasedRateLimiter(
         storage_path=os.path.join(TEMP_DIR, "rate_limits.json"),
         cooldown_hours=RATE_LIMIT_COOLDOWN_HOURS
     )
     logger.info(f"Rate limiter initialized with {RATE_LIMIT_COOLDOWN_HOURS}h cooldown")
+
+# Initialize database
+init_db()
 
 # Initialize FastAPI app with optimized settings
 app = FastAPI(
@@ -389,6 +440,42 @@ app.add_middleware(
     allow_methods=["*"] if is_dev else ["GET", "POST"],
     allow_headers=["*"] if is_dev else ["Content-Type", "X-Device-Fingerprint"],
 )
+
+# Add session middleware
+if SESSION_SECRET:
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=SESSION_SECRET,
+        session_cookie="coaster_session",
+        max_age=30 * 24 * 60 * 60,  # 30 days
+        same_site="lax",
+        https_only=True if ENVIRONMENT == "production" else False,
+    )
+    logger.info("Session middleware enabled")
+
+# Initialize OAuth
+oauth = OAuth()
+enabled_providers = []
+if OAUTH_GOOGLE_CLIENT_ID and OAUTH_GOOGLE_CLIENT_SECRET:
+    oauth.register(
+        name="google",
+        client_id=OAUTH_GOOGLE_CLIENT_ID,
+        client_secret=OAUTH_GOOGLE_CLIENT_SECRET,
+        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+        client_kwargs={"scope": "openid email profile"},
+    )
+    enabled_providers.append("google")
+    logger.info("Google OAuth registered")
+
+# Initialize Dodo Payments client
+dodo_client = None
+if DODO_API_KEY:
+    dodo_client = DodoPayments(
+        bearer_token=DODO_API_KEY,
+        environment=DODO_ENV,
+        webhook_key=DODO_WEBHOOK_KEY,
+    )
+    logger.info("Dodo Payments client initialized")
 
 # Security headers middleware
 @app.middleware("http")
@@ -409,7 +496,7 @@ async def add_security_headers(request, call_next):
         "form-action 'self'; "
         "script-src 'self' 'unsafe-inline' cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com threejs.org; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        "img-src 'self' blob: data:; "
+        "img-src 'self' blob: data: https://lh3.googleusercontent.com; "
         "connect-src 'self' https://api.bfl.ai https://auth.bfl.ai; "
         "font-src 'self' https://fonts.gstatic.com; "
     )
@@ -424,6 +511,222 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "frontend", "templates"))
 app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "frontend", "static")), name="static")
 
+
+# ============= AUTH ROUTES =============
+
+@app.get("/api/auth/providers")
+async def get_auth_providers():
+    """Return list of available OAuth providers."""
+    return {"providers": enabled_providers}
+
+
+@app.get("/api/auth/me")
+async def get_auth_me(request: Request):
+    """Get current user info from session."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return {"authenticated": False}
+    
+    user = get_user_by_id(user_id)
+    if not user:
+        request.session.pop("user_id", None)
+        return {"authenticated": False}
+    
+    return {
+        "authenticated": True,
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "name": user.get("name"),
+            "avatar_url": user.get("avatar_url")
+        }
+    }
+
+
+@app.post("/api/auth/logout")
+async def logout(request: Request):
+    """Clear user session."""
+    request.session.pop("user_id", None)
+    return {"success": True}
+
+
+# ============= OAUTH LOGIN ROUTES =============
+
+@app.get("/auth/login/google")
+async def login_google(request: Request):
+    """Redirect to Google OAuth."""
+    if "google" not in enabled_providers:
+        raise HTTPException(status_code=404, detail="Google login is not configured")
+
+    return await oauth.google.authorize_redirect(
+        request,
+        f"{PUBLIC_BASE_URL}/auth/callback/google",
+    )
+
+
+@app.get("/auth/callback/google")
+async def callback_google(request: Request):
+    """Handle Google OAuth callback."""
+    if "google" not in enabled_providers:
+        raise HTTPException(status_code=404, detail="Google login is not configured")
+
+    try:
+        token = await oauth.google.authorize_access_token(request)
+        user_info = token.get("userinfo", {})
+        if not user_info:
+            try:
+                user_info = await oauth.google.userinfo(token=token)
+            except Exception:
+                user_info = {}
+
+        email = (user_info.get("email") or "").strip().lower()
+        sub = user_info.get("sub") or token.get("sub") or ""
+        name = user_info.get("name")
+        avatar_url = user_info.get("picture")
+
+        if not email or not sub:
+            raise HTTPException(status_code=400, detail="Google profile is missing required fields")
+
+        user = get_user_by_oauth("google", sub)
+        if not user:
+            user = get_user_by_email(email)
+        if not user:
+            user_id, _ = create_user(email=email, name=name, avatar_url=avatar_url)
+            user = get_user_by_id(user_id)
+        if not user:
+            raise HTTPException(status_code=500, detail="Unable to create user")
+
+        link_oauth_identity(
+            user_id=user["id"],
+            provider="google",
+            provider_user_id=sub,
+            access_token=token.get("access_token"),
+            refresh_token=token.get("refresh_token"),
+        )
+
+        request.session["user_id"] = user["id"]
+        return RedirectResponse(url="/", status_code=302)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Google OAuth callback error: {exc}")
+        raise HTTPException(status_code=500, detail="Login failed")
+
+
+# ============= BILLING ROUTES =============
+
+@app.post("/api/billing/checkout")
+async def get_checkout_url(request: Request):
+    """Create hosted Dodo checkout session for subscription upgrade."""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    if not dodo_client or not DODO_SUBSCRIPTION_PRODUCT_ID:
+        raise HTTPException(status_code=500, detail="Billing is not configured")
+
+    user = get_user_by_id(user_id)
+    if not user:
+        request.session.pop("user_id", None)
+        raise HTTPException(status_code=401, detail="User not found")
+
+    session = dodo_client.checkout_sessions.create(
+        product_cart=[{"product_id": DODO_SUBSCRIPTION_PRODUCT_ID, "quantity": 1}],
+        customer={"email": user["email"], "name": user.get("name")},
+        metadata={"user_id": user_id},
+        return_url=f"{PUBLIC_BASE_URL}/?billing=return",
+    )
+
+    checkout_url = getattr(session, "checkout_url", None) or getattr(session, "url", None)
+    session_id = getattr(session, "session_id", None)
+    if not checkout_url:
+        raise HTTPException(status_code=502, detail="Checkout URL missing from billing provider response")
+
+    return {"checkout_url": checkout_url, "session_id": session_id}
+
+
+@app.post("/api/billing/webhook")
+async def handle_webhook(request: Request):
+    """Handle Dodo Payments webhook events."""
+    if not dodo_client:
+        raise HTTPException(status_code=500, detail="Billing is not configured")
+
+    webhook_id = request.headers.get("webhook-id", "")
+    webhook_signature = request.headers.get("webhook-signature", "")
+    webhook_timestamp = request.headers.get("webhook-timestamp", "")
+
+    if not webhook_id:
+        raise HTTPException(status_code=400, detail="Missing webhook-id")
+
+    if is_webhook_processed(webhook_id):
+        return {"received": True}
+
+    raw_body = await request.body()
+
+    try:
+        unwrapped = dodo_client.webhooks.unwrap(
+            raw_body,
+            headers={
+                "webhook-id": webhook_id,
+                "webhook-signature": webhook_signature,
+                "webhook-timestamp": webhook_timestamp,
+            },
+        )
+    except Exception as exc:
+        logger.error(f"Webhook signature verification failed: {exc}")
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    payload = unwrapped.model_dump() if hasattr(unwrapped, "model_dump") else unwrapped
+    if not isinstance(payload, dict):
+        payload = {}
+
+    event_type = payload.get("type", "")
+    data = payload.get("data") or {}
+    subscription = data.get("subscription") or (data if data.get("payload_type") == "Subscription" else {})
+
+    if event_type.startswith("subscription.") or subscription:
+        metadata = subscription.get("metadata") or {}
+        customer = subscription.get("customer") or {}
+        email = (customer.get("email") or subscription.get("customer_email") or "").strip().lower()
+
+        user_id = metadata.get("user_id")
+        if not user_id and email:
+            user = get_user_by_email(email)
+            user_id = user["id"] if user else None
+
+        if user_id:
+            status = (subscription.get("status") or event_type.replace("subscription.", "") or "unknown").lower()
+            set_subscription(
+                user_id=user_id,
+                provider="dodo",
+                customer_id=customer.get("id") or subscription.get("customer_id"),
+                subscription_id=subscription.get("id") or subscription.get("subscription_id"),
+                status=status,
+                period_start=subscription.get("period_start") or subscription.get("current_period_start"),
+                period_end=subscription.get("period_end") or subscription.get("current_period_end"),
+                plan_code=subscription.get("plan_code") or subscription.get("product_id"),
+            )
+
+    record_webhook(webhook_id, event_type)
+    return {"received": True}
+
+
+@app.get("/api/usage")
+async def get_usage(request: Request):
+    """Get user's quota information."""
+    user_id = request.session.get("user_id")
+    fingerprint = request.headers.get("X-Device-Fingerprint")
+    ip_header = request.headers.get("X-Forwarded-For")
+    
+    allowed, message, retry_after, usage_info = await check_quota(
+        fingerprint, user_id, ip_header
+    )
+    
+    return {
+        "authenticated": bool(user_id),
+        "quota_exhausted": not allowed,
+        **usage_info
+    }
 
 # Validation functions
 def validate_job_id(job_id: str) -> str:
@@ -1374,17 +1677,17 @@ async def process_image(
     stamp_text = validate_stamp_text(stamp_text)
     logger.info(f"Stamp text validated: {stamp_text}")
 
+    # Resolve identity context
+    user_id = request.session.get("user_id")
+    device_fingerprint = request.headers.get("X-Device-Fingerprint")
+    client_ip = get_client_ip(request)
+
     # Check if bypassing with own API key
     bypass_limit = bool(api_key) and ALLOW_BYPASS_WITH_API_KEY
     using_own_key = bool(api_key)
 
     # Check rate limit (if enabled and not bypassing)
     if RATE_LIMIT_ENABLED and not bypass_limit and rate_limiter:
-        # Get client info for rate limiting
-        client_ip = get_client_ip(request)
-        user_agent = request.headers.get("User-Agent", "")
-        device_fp = request.headers.get("X-Device-Fingerprint", "")
-        
         # Create fingerprint
         fingerprint = get_rate_limit_key(request)
         
@@ -1427,11 +1730,36 @@ async def process_image(
         logger.error("Empty image file received")
         raise HTTPException(status_code=400, detail="Empty image file")
 
+    # Quota checks (authoritative product limits)
+    quota_allowed, quota_message, _, usage_info = await check_quota(
+        device_fingerprint,
+        user_id,
+        client_ip,
+    )
+    if not quota_allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "quota_exceeded",
+                "message": usage_info.get("message") or quota_message,
+                "next_action": usage_info.get("next_action"),
+                "usage": usage_info,
+            },
+        )
+
     # Create job (don't store API key in job for security)
     job_id = str(uuid.uuid4())
     job = Job(job_id=job_id, stamp_text=stamp_text)
     JobStore.save_job(job)
     logger.info(f"✓ Job created: {job_id} with stamp: {stamp_text}")
+
+    # Consume quota after job creation
+    quota_bucket = usage_info.get("bucket")
+    if not quota_bucket:
+        raise HTTPException(status_code=500, detail="Quota decision failed")
+    quota_event_id = await consume_quota(job_id, device_fingerprint, user_id, quota_bucket)
+    if not quota_event_id:
+        raise HTTPException(status_code=500, detail="Unable to reserve quota at this time")
 
     # Use provided API key or env var
     effective_api_key = api_key if api_key else os.environ.get("BFL_API_KEY")
@@ -1594,6 +1922,7 @@ async def confirm_job(job_id: str, background_tasks: BackgroundTasks):
 @app.post("/api/retry/{job_id}")
 async def retry_job(
     job_id: str,
+    request: Request,
     background_tasks: BackgroundTasks,
     image: UploadFile = File(...),
     diameter: float = Form(100.0),
@@ -1620,6 +1949,26 @@ async def retry_job(
     image_bytes = await image.read()
     if len(image_bytes) == 0:
         raise HTTPException(status_code=400, detail="Empty image file")
+
+    user_id = request.session.get("user_id")
+    device_fingerprint = request.headers.get("X-Device-Fingerprint")
+    client_ip = get_client_ip(request)
+
+    quota_allowed, quota_message, _, usage_info = await check_quota(
+        device_fingerprint,
+        user_id,
+        client_ip,
+    )
+    if not quota_allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "quota_exceeded",
+                "message": usage_info.get("message") or quota_message,
+                "next_action": usage_info.get("next_action"),
+                "usage": usage_info,
+            },
+        )
     
     # Reset job state
     job.status = "pending"
@@ -1628,6 +1977,13 @@ async def retry_job(
     job.preview_image_path = None
     job.error = None
     JobStore.save_job(job)
+
+    quota_bucket = usage_info.get("bucket")
+    if not quota_bucket:
+        raise HTTPException(status_code=500, detail="Quota decision failed")
+    quota_event_id = await consume_quota(job_id, device_fingerprint, user_id, quota_bucket)
+    if not quota_event_id:
+        raise HTTPException(status_code=500, detail="Unable to reserve quota at this time")
     
     # Create parameters object
     params = ProcessRequest(
@@ -1640,8 +1996,13 @@ async def retry_job(
         bottom_rotate=bottom_rotate
     )
     
-    # Start background processing
-    background_tasks.add_task(process_coaster_job, job_id, image_bytes, params)
+    # Start background processing with required args
+    effective_api_key = os.environ.get("BFL_API_KEY")
+    if not effective_api_key:
+        raise HTTPException(status_code=500, detail="No API key configured")
+
+    stamp_text = job.stamp_text or "Abhishek Does Stuff"
+    background_tasks.add_task(process_coaster_job, job_id, image_bytes, params, stamp_text, effective_api_key)
     
     return {"job_id": job_id, "status": "processing", "message": "Restarting with new image..."}
 
