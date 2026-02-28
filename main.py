@@ -1840,22 +1840,28 @@ async def process_image(
         logger.error("Empty image file received")
         raise HTTPException(status_code=400, detail="Empty image file")
 
+    # Check if bypassing with own API key
+    bypass_limit = bool(api_key) and ALLOW_BYPASS_WITH_API_KEY
+    using_own_key = bool(api_key)
+
     # Quota checks (authoritative product limits)
-    quota_allowed, quota_message, _, usage_info = await check_quota(
-        device_fingerprint,
-        user_id,
-        client_ip,
-    )
-    if not quota_allowed:
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "error": "quota_exceeded",
-                "message": usage_info.get("message") or quota_message,
-                "next_action": usage_info.get("next_action"),
-                "usage": usage_info,
-            },
+    usage_info = {}
+    if not bypass_limit:
+        quota_allowed, quota_message, _, usage_info = await check_quota(
+            device_fingerprint,
+            user_id,
+            client_ip,
         )
+        if not quota_allowed:
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "quota_exceeded",
+                    "message": usage_info.get("message") or quota_message,
+                    "next_action": usage_info.get("next_action"),
+                    "usage": usage_info,
+                },
+            )
 
     # Create job (don't store API key in job for security)
     job_id = str(uuid.uuid4())
@@ -1864,12 +1870,15 @@ async def process_image(
     logger.info(f"✓ Job created: {job_id} with stamp: {stamp_text}")
 
     # Consume quota after job creation
-    quota_bucket = usage_info.get("bucket")
-    if not quota_bucket:
-        raise HTTPException(status_code=500, detail="Quota decision failed")
-    quota_event_id = await consume_quota(job_id, device_fingerprint, user_id, quota_bucket)
-    if not quota_event_id:
-        raise HTTPException(status_code=500, detail="Unable to reserve quota at this time")
+    if not bypass_limit:
+        quota_bucket = usage_info.get("bucket")
+        if not quota_bucket:
+            raise HTTPException(status_code=500, detail="Quota decision failed")
+        quota_event_id = await consume_quota(job_id, device_fingerprint, user_id, quota_bucket)
+        if not quota_event_id:
+            raise HTTPException(status_code=500, detail="Unable to reserve quota at this time")
+    else:
+        logger.info("Bypassing quota consumption because user provided their own BFL API key")
 
     # Use provided API key or env var
     effective_api_key = api_key if api_key else os.environ.get("BFL_API_KEY")
@@ -2064,6 +2073,12 @@ async def retry_job(
     device_fingerprint = request.headers.get("X-Device-Fingerprint")
     client_ip = get_client_ip(request)
 
+    # In retry, we might not have the API key in the form, but if the original used one, we should ideally bypass.
+    # However, retry currently doesn't accept the api_key form field.
+    # For now, we'll enforce quota on retries unless they had their own API key (which we aren't tracking natively in job, unfortunately, for security).
+    # Since we don't store the API key, retries always use the server quota or fail if server quota is out.
+    
+    usage_info = {}
     quota_allowed, quota_message, _, usage_info = await check_quota(
         device_fingerprint,
         user_id,
