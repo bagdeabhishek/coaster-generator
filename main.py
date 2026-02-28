@@ -618,6 +618,61 @@ async def login_google(request: Request):
         raise HTTPException(status_code=500, detail=f"OAuth error: {type(e).__name__}")
 
 
+@app.get("/auth/test-oauth-connection")
+async def test_oauth_connection():
+    """Test OAuth network connectivity directly."""
+    import httpx
+    import asyncio
+    
+    results = {}
+    
+    # Test 1: Fresh httpx client
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get("https://accounts.google.com/.well-known/openid-configuration")
+            results["fresh_httpx"] = f"SUCCESS: {r.status_code}"
+    except Exception as e:
+        results["fresh_httpx"] = f"FAILED: {type(e).__name__}: {e}"
+    
+    # Test 2: Authlib's internal client
+    if "google" in enabled_providers:
+        try:
+            # Access Authlib's internal client
+            from authlib.integrations.httpx_client import AsyncOAuth2Client
+            client = oauth.google._client
+            r = await client.get("https://accounts.google.com/.well-known/openid-configuration", withhold_token=True)
+            results["authlib_client"] = f"SUCCESS: {r.status_code}"
+        except Exception as e:
+            results["authlib_client"] = f"FAILED: {type(e).__name__}: {e}"
+    else:
+        results["authlib_client"] = "SKIPPED: OAuth not enabled"
+    
+    # Test 3: DNS resolution timing
+    import socket
+    import time
+    start = time.time()
+    try:
+        info = socket.getaddrinfo("accounts.google.com", 443)
+        elapsed = time.time() - start
+        results["dns_timing"] = f"SUCCESS: {len(info)} results in {elapsed:.3f}s, first: {info[0][4]}"
+    except Exception as e:
+        results["dns_timing"] = f"FAILED: {type(e).__name__}: {e}"
+    
+    # Test 4: Raw TCP connection
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection("accounts.google.com", 443),
+            timeout=5
+        )
+        writer.close()
+        await writer.wait_closed()
+        results["raw_tcp"] = "SUCCESS: Connected"
+    except Exception as e:
+        results["raw_tcp"] = f"FAILED: {type(e).__name__}: {e}"
+    
+    return results
+
+
 @app.get("/auth/callback/google")
 async def callback_google(request: Request):
     """Handle Google OAuth callback."""
