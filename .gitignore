@@ -149,6 +149,19 @@ temp/
 *.jpeg
 *.svg
 !prompt.txt
+*.3mf
+*.db
+*.db-wal
+*.db-shm
+*.log
+.env.*
+playwright-screenshots/
+.playwright-cli/
+*.yml
+*.yaml
+nohup.out
+.claude/
+fix_dismiss.py
 
 # OS specific
 .DS_Store

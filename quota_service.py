@@ -159,6 +159,8 @@ async def check_quota(
                     "You've used your free generation. "
                     "Sign in to unlock 2 more free generations."
                 )
+                
+        usage_info["bucket"] = bucket
         
         return allowed, message, retry_after, usage_info
 

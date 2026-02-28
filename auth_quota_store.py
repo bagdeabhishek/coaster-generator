@@ -445,3 +445,15 @@ def is_webhook_processed(webhook_id: str) -> bool:
 if __name__ == "__main__":
     init_db()
     print("Database initialization complete")
+
+def clear_all_quotas():
+    """Clear all quota usage (useful for dev mode testing)."""
+    with db_lock:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM usage_events")
+            conn.commit()
+            return True
+        finally:
+            conn.close()

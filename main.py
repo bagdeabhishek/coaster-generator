@@ -50,6 +50,7 @@ from auth_quota_store import (
     set_subscription,
     record_webhook,
     is_webhook_processed,
+    clear_all_quotas,
 )
 from quota_service import check_quota, consume_quota, PAID_MONTHLY_LIMIT
 
@@ -588,6 +589,14 @@ async def logout(request: Request):
     request.session.pop("user_id", None)
     return {"success": True}
 
+@app.post("/api/dev/clear-quotas")
+async def dev_clear_quotas():
+    """DEV ONLY: Clear all quota usage."""
+    if ENVIRONMENT != "development":
+        raise HTTPException(status_code=403, detail="Not available in production")
+    clear_all_quotas()
+    return {"success": True, "message": "All quotas cleared"}
+
 
 # ============= OAUTH LOGIN ROUTES =============
 
@@ -764,6 +773,7 @@ async def get_usage(request: Request):
     return {
         "authenticated": bool(user_id),
         "quota_exhausted": not allowed,
+        "debug_mode": ENVIRONMENT == "development",
         **usage_info
     }
 

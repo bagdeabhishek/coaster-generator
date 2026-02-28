@@ -177,6 +177,24 @@ async function initAuthAndUsage() {
         });
     }
 
+    const devClearBtn = document.getElementById('devClearQuotaBtn');
+    if (devClearBtn) {
+        devClearBtn.addEventListener('click', async () => {
+            try {
+                const response = await fetch('/api/dev/clear-quotas', { method: 'POST' });
+                if (response.ok) {
+                    alert('Quotas cleared successfully!');
+                    await refreshUsage();
+                } else {
+                    const data = await response.json();
+                    alert(`Failed to clear: ${data.detail || 'Unknown error'}`);
+                }
+            } catch (e) {
+                alert('Error connecting to server.');
+            }
+        });
+    }
+
     await Promise.all([loadAuthProviders(), loadAuthState()]);
     renderAuth();
     await refreshUsage();
@@ -249,6 +267,12 @@ async function refreshUsage() {
         const data = await response.json();
         usageState = data;
         renderUsage(data);
+        
+        // Show dev reset button if in dev mode
+        if (data.debug_mode) {
+            const devBtn = document.getElementById('devClearQuotaBtn');
+            if (devBtn) devBtn.classList.remove('hidden');
+        }
     } catch (_) {
         if (elements.usageSummary) {
             elements.usageSummary.textContent = 'Unable to load usage right now.';
