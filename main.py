@@ -504,12 +504,22 @@ if SESSION_SECRET:
 oauth = OAuth()
 enabled_providers = []
 if OAUTH_GOOGLE_CLIENT_ID and OAUTH_GOOGLE_CLIENT_SECRET:
+    # Explicitly configure httpx client to only use IPv4
+    # This prevents the "All connection attempts failed" error in IPv6-broken containers
+    import httpx
+    
+    # We create a custom transport that enforces local address family to AF_INET
+    transport = httpx.AsyncHTTPTransport(local_address="0.0.0.0")
+    client = httpx.AsyncClient(transport=transport)
+    
     oauth.register(
         name="google",
         client_id=OAUTH_GOOGLE_CLIENT_ID,
         client_secret=OAUTH_GOOGLE_CLIENT_SECRET,
         server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
         client_kwargs={"scope": "openid email profile"},
+        # Inject the custom IPv4-only client into Authlib
+        client=client
     )
     enabled_providers.append("google")
     logger.info("Google OAuth registered")
