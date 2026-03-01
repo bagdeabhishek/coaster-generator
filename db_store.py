@@ -18,22 +18,10 @@ if USE_POSTGRES:
     import psycopg2
     from psycopg2.extras import RealDictCursor
     from psycopg2.pool import SimpleConnectionPool
-    import socket
     
     # Connection pool for PostgreSQL
     db_pool = None
     db_lock = threading.Lock()
-    
-    def get_ipv4_host(hostname):
-        """Force IPv4 resolution to avoid IPv6 issues in Docker/LXC."""
-        try:
-            # Get only IPv4 addresses
-            addr_info = socket.getaddrinfo(hostname, None, socket.AF_INET)
-            if addr_info:
-                return addr_info[0][4][0]
-        except Exception:
-            pass
-        return hostname
     
     def get_connection():
         """Get a connection from the pool."""
@@ -41,23 +29,10 @@ if USE_POSTGRES:
         if db_pool is None:
             with db_lock:
                 if db_pool is None:
-                    # Parse DATABASE_URL to extract host and force IPv4
-                    import re
-                    match = re.match(r'postgresql://([^:]+):([^@]+)@([^:/]+)(?::(\d+))?/(.+)', DATABASE_URL)
-                    if match:
-                        user, password, host, port, dbname = match.groups()
-                        port = port or '5432'
-                        # Force IPv4
-                        ipv4_host = get_ipv4_host(host)
-                        conn_str = f"host={ipv4_host} port={port} dbname={dbname} user={user} password={password}"
-                    else:
-                        conn_str = DATABASE_URL
-                    
                     db_pool = SimpleConnectionPool(
                         1, 20,
-                        conn_str,
-                        cursor_factory=RealDictCursor,
-                        connect_timeout=10
+                        DATABASE_URL,
+                        cursor_factory=RealDictCursor
                     )
         return db_pool.getconn()
     
