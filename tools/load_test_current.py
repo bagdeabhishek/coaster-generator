@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Load test for Coaster Generator - Current Production Load Testing
+Load test for CoastGen - Current Production Load Testing
 
 This script supports two modes:
 1. Phase 2 only (default): Bypasses BFL by seeding jobs in "review" state
@@ -9,13 +9,13 @@ This script supports two modes:
 Usage examples:
   # Test Phase 2 only (no BFL, uses existing preview fixture):
   python tools/load_test_current.py \
-      --base-url https://coaster.abhishekdoesstuff.com \
+      --base-url https://coastgen.abhishekdoesstuff.com \
       --total-jobs 12 \
       --concurrency 4
 
   # Test with API key (full flow including BFL generation):
   python tools/load_test_current.py \
-      --base-url https://coaster.abhishekdoesstuff.com \
+      --base-url https://coastgen.abhishekdoesstuff.com \
       --total-jobs 5 \
       --concurrency 2 \
       --use-api-key YOUR_API_KEY \
@@ -23,10 +23,9 @@ Usage examples:
 
   # Test rate limits:
   python tools/load_test_current.py \
-      --base-url https://coaster.abhishekdoesstuff.com \
+      --base-url https://coastgen.abhishekdoesstuff.com \
       --total-jobs 20 \
-      --concurrency 10 \
-      --mode rapid
+      --concurrency 10
 """
 
 import argparse
