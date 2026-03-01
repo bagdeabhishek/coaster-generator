@@ -30,7 +30,6 @@ Usage examples:
 
 import argparse
 import asyncio
-import base64
 import json
 import os
 import time
@@ -134,22 +133,26 @@ async def submit_job_full_flow(
     api_key: str,
     test_image_path: str,
     params: Dict[str, object],
-) -> Tuple[str, Optional[str]]:
+) -> Tuple[Optional[str], Optional[str]]:
     """Submit a job via full API with image upload."""
     try:
+        form = aiohttp.FormData()
         with open(test_image_path, "rb") as f:
-            image_data = base64.b64encode(f.read()).decode()
+            image_bytes = f.read()
 
-        payload = {
-            "image_data": image_data,
-            "filename": os.path.basename(test_image_path),
-            "api_key": api_key,
-            **params
-        }
+        form.add_field(
+            "image",
+            image_bytes,
+            filename=os.path.basename(test_image_path),
+            content_type="image/png",
+        )
+        form.add_field("api_key", api_key)
+        for key, value in params.items():
+            form.add_field(key, str(value))
 
         async with session.post(
             f"{base_url}/api/process",
-            json=payload,
+            data=form,
             timeout=aiohttp.ClientTimeout(total=60)
         ) as resp:
             if resp.status != 200:
@@ -227,6 +230,44 @@ async def poll_job_status(
         await asyncio.sleep(poll_interval)
     
     return "timeout", f"Timed out after {timeout_s:.1f}s", timeout_s
+
+
+async def wait_for_review_status(
+    session: aiohttp.ClientSession,
+    base_url: str,
+    job_id: str,
+    poll_interval: float,
+    timeout_s: float,
+) -> Tuple[str, Optional[str], float]:
+    """Wait until job reaches review or fails/times out."""
+    t0 = time.perf_counter()
+    deadline = t0 + timeout_s
+
+    while time.perf_counter() < deadline:
+        try:
+            async with session.get(
+                f"{base_url}/api/status/{job_id}",
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status != 200:
+                    await asyncio.sleep(poll_interval)
+                    continue
+
+                data = await resp.json()
+                status = data.get("status", "unknown")
+
+                if status == "review":
+                    return status, None, (time.perf_counter() - t0)
+                if status == "failed":
+                    err = data.get("error") or data.get("message", "Unknown error")
+                    return status, err, (time.perf_counter() - t0)
+
+        except Exception:
+            pass
+
+        await asyncio.sleep(poll_interval)
+
+    return "timeout", f"Timed out waiting for review after {timeout_s:.1f}s", timeout_s
 
 
 async def run_job_phase2(
@@ -309,13 +350,62 @@ async def run_job_full_flow(
             duration_ms=durations,
             error=submit_err,
         )
-    
+
     # Step 2: Wait for review state (BFL generation)
-    # For now, we skip polling for review and assume it's ready
-    # In real scenario, you'd poll until status is "review"
-    
-    # Step 3: Confirm and poll for completion
-    return await run_job_phase2(session, base_url, job_id, poll_interval, timeout_s)
+    status, review_err, review_duration = await wait_for_review_status(
+        session, base_url, job_id, poll_interval, timeout_s
+    )
+    durations['review_wait'] = review_duration * 1000.0
+
+    if status != "review":
+        durations['total'] = (time.perf_counter() - t_start) * 1000.0
+        return JobRunResult(
+            job_id=job_id,
+            ok=False,
+            status="review_failed" if status == "failed" else status,
+            phase="review",
+            duration_ms=durations,
+            error=review_err,
+        )
+
+    # Step 3: Confirm
+    confirm_ok, confirm_err, confirm_ms = await confirm_job(session, base_url, job_id)
+    durations['confirm'] = confirm_ms
+    if not confirm_ok:
+        durations['total'] = (time.perf_counter() - t_start) * 1000.0
+        return JobRunResult(
+            job_id=job_id,
+            ok=False,
+            status="confirm_failed",
+            phase="confirm",
+            duration_ms=durations,
+            error=confirm_err,
+        )
+
+    # Step 4: Poll for completion
+    final_status, poll_err, poll_duration = await poll_job_status(
+        session, base_url, job_id, poll_interval, timeout_s
+    )
+    durations['poll'] = poll_duration * 1000.0
+    durations['total'] = (time.perf_counter() - t_start) * 1000.0
+
+    if final_status == "completed":
+        return JobRunResult(
+            job_id=job_id,
+            ok=True,
+            status=final_status,
+            phase="complete",
+            duration_ms=durations,
+        )
+
+    return JobRunResult(
+        job_id=job_id,
+        ok=False,
+        status=final_status,
+        phase="poll",
+        duration_ms=durations,
+        error=poll_err,
+    )
 
 
 async def run_load_phase2(

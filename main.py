@@ -1777,9 +1777,12 @@ async def process_vectorization_3d(job_id: str):
                 await update_job_status(job_id, "processing_3d", 80, "Generating on cloud GPU/CPU...")
                 
                 # Convert image to bytes to send over wire
-                img_byte_arr = io.BytesIO()
-                flattened_image.save(img_byte_arr, format='PNG')
-                img_bytes = img_byte_arr.getvalue()
+                if isinstance(flattened_image, (bytes, bytearray)):
+                    img_bytes = bytes(flattened_image)
+                else:
+                    img_byte_arr = io.BytesIO()
+                    flattened_image.save(img_byte_arr, format='PNG')
+                    img_bytes = img_byte_arr.getvalue()
                 
                 # Call Modal function synchronously (it's network IO bound from our perspective)
                 loop = asyncio.get_running_loop()
