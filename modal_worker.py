@@ -1,6 +1,5 @@
 import modal
 from typing import Dict, Any, Tuple
-import io
 
 # Define the container environment Modal needs to run the 3D generation.
 # We include all the heavy mathematical libraries here.
@@ -14,6 +13,7 @@ image = (
         "scipy==1.11.4",
         "shapely==2.0.2"
     )
+    .add_local_python_source("tools")
 )
 
 # Define the Modal application
