@@ -1,5 +1,5 @@
 """
-3D Coaster Generator Web Application
+CoastGen - 3D Custom Coaster Generator
 FastAPI backend with async job processing for converting images to 3D printable coasters.
 """
 
@@ -85,7 +85,7 @@ if DEBUG_NO_CLEANUP:
     logger.warning("="*60)
 
 logger.info("="*60)
-logger.info("Starting 3D Coaster Generator")
+logger.info("Starting CoastGen")
 logger.info("="*60)
 
 # Configuration
@@ -462,7 +462,7 @@ if USE_MODAL_FALLBACK:
 
 # Initialize FastAPI app with optimized settings
 app = FastAPI(
-    title="3D Coaster Generator",
+    title="CoastGen",
     version="1.0.0",
     docs_url="/docs" if DEBUG_NO_CLEANUP else None,
     redoc_url="/redoc" if DEBUG_NO_CLEANUP else None,
@@ -2209,11 +2209,17 @@ async def get_frontend(request: Request):
     return templates.TemplateResponse("index.html", {
         "request": request,
         "config": {
-            "app_name": "3D Coaster Generator",
+            "app_name": "CoastGen",
             "default_stamp": "Abhishek Does Stuff",
             "max_stamp_length": 50
         }
     })
+
+
+@app.get("/favicon.ico", response_class=FileResponse)
+async def favicon():
+    """Serve favicon.ico - prevents 404 errors in browser console."""
+    return FileResponse("frontend/static/favicon.png", media_type="image/png")
 
 
 if __name__ == "__main__":

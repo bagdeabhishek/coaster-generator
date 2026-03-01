@@ -1,4 +1,4 @@
-# 3D Coaster Generator
+# CoastGen
 
 Transform any image into a 3D printable coaster using AI-powered image processing and vector-based 3D modeling.
 
