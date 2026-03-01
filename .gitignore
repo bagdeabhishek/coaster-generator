@@ -149,6 +149,7 @@ temp/
 *.jpeg
 *.svg
 !prompt.txt
+!frontend/static/*.png
 *.3mf
 *.db
 *.db-wal
