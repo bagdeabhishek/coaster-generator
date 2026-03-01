@@ -480,6 +480,24 @@ if USE_MODAL_FALLBACK:
         logger.warning("Modal library not installed. Disabling burst to cloud.")
         USE_MODAL_FALLBACK = False
 
+
+def _lookup_modal_function(app_name: str, function_name: str):
+    """Resolve Modal function across client API versions."""
+    if not USE_MODAL_FALLBACK:
+        raise RuntimeError("Modal fallback is disabled")
+
+    # Older SDKs
+    lookup = getattr(modal.Function, "lookup", None)
+    if callable(lookup):
+        return lookup(app_name, function_name)
+
+    # Newer SDKs
+    from_name = getattr(modal.Function, "from_name", None)
+    if callable(from_name):
+        return from_name(app_name, function_name)
+
+    raise RuntimeError("Unsupported Modal SDK: no Function.lookup/from_name")
+
 # Initialize FastAPI app with optimized settings
 app = FastAPI(
     title="CoastGen",
@@ -1786,7 +1804,7 @@ async def process_vectorization_3d(job_id: str):
                 
                 # Call Modal function synchronously (it's network IO bound from our perspective)
                 loop = asyncio.get_running_loop()
-                modal_func = modal.Function.lookup(MODAL_APP_NAME, "generate_3d_coaster")
+                modal_func = _lookup_modal_function(MODAL_APP_NAME, "generate_3d_coaster")
                 combined_bytes, body_bytes, logos_bytes = await loop.run_in_executor(
                     None, 
                     modal_func.remote, 
