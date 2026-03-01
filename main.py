@@ -17,7 +17,7 @@ import re
 import time
 from datetime import datetime
 from typing import Optional, Dict, Any
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 
 import aiohttp
 import trimesh
@@ -1805,11 +1805,12 @@ async def process_vectorization_3d(job_id: str):
                 # Call Modal function synchronously (it's network IO bound from our perspective)
                 loop = asyncio.get_running_loop()
                 modal_func = _lookup_modal_function(MODAL_APP_NAME, "generate_3d_coaster")
+                params_payload = params.model_dump() if hasattr(params, "model_dump") else params.dict()
                 combined_bytes, body_bytes, logos_bytes = await loop.run_in_executor(
                     None, 
                     modal_func.remote, 
                     img_bytes, 
-                    asdict(params), 
+                    params_payload,
                     stamp_text
                 )
                 
