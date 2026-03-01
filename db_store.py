@@ -89,70 +89,31 @@ def init_db():
     """Initialize the database schema."""
     with get_db() as conn:
         cursor = conn.cursor()
-        
-        # Users table
-        cursor.execute(f"""
-            CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                email TEXT UNIQUE NOT NULL,
-                email_verified INT DEFAULT 0,
-                name TEXT,
-                avatar_url TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-        """)
-        
-        # OAuth identities table
+        lock_id = 438217
+
+        # Serialize schema init across gunicorn workers for PostgreSQL.
         if USE_POSTGRES:
-            # PostgreSQL syntax for unique constraint
-            cursor.execute(f"""
-                CREATE TABLE IF NOT EXISTS oauth_identities (
+            cursor.execute("SELECT pg_advisory_lock(%s)", (lock_id,))
+
+        try:
+            # Users table
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
                     id TEXT PRIMARY KEY,
-                    provider TEXT NOT NULL,
-                    provider_user_id TEXT NOT NULL,
-                    user_id TEXT NOT NULL,
-                    access_token TEXT,
-                    refresh_token TEXT,
-                    token_expires_at INTEGER,
+                    email TEXT UNIQUE NOT NULL,
+                    email_verified INT DEFAULT 0,
+                    name TEXT,
+                    avatar_url TEXT,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    CONSTRAINT unique_provider_user UNIQUE (provider, provider_user_id),
-                    CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id)
+                    updated_at TEXT NOT NULL
                 )
-            """)
-            
-            # PostgreSQL UPSERT syntax - only create if not exists
-            # Check if function exists first to avoid race conditions
-            cursor.execute("""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'upsert_oauth_identity') THEN
-                        CREATE FUNCTION upsert_oauth_identity(
-                            p_id TEXT, p_provider TEXT, p_provider_user_id TEXT, p_user_id TEXT,
-                            p_access_token TEXT, p_refresh_token TEXT, p_token_expires_at INTEGER,
-                            p_created_at TEXT, p_updated_at TEXT
-                        ) RETURNS VOID AS $$
-                        BEGIN
-                            INSERT INTO oauth_identities
-                                (id, provider, provider_user_id, user_id, access_token, refresh_token,
-                                 token_expires_at, created_at, updated_at)
-                            VALUES (p_id, p_provider, p_provider_user_id, p_user_id, p_access_token,
-                                    p_refresh_token, p_token_expires_at, p_created_at, p_updated_at)
-                            ON CONFLICT (provider, provider_user_id) DO UPDATE SET
-                                user_id = EXCLUDED.user_id,
-                                access_token = EXCLUDED.access_token,
-                                refresh_token = EXCLUDED.refresh_token,
-                                token_expires_at = EXCLUDED.token_expires_at,
-                                updated_at = EXCLUDED.updated_at;
-                        END;
-                        $$ LANGUAGE plpgsql;
-                    END IF;
-                END $$;
-            """)
-        else:
-            # SQLite syntax
-            cursor.execute(f"""
+                """
+            )
+
+            # OAuth identities table
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS oauth_identities (
                     id TEXT PRIMARY KEY,
                     provider TEXT NOT NULL,
@@ -166,61 +127,70 @@ def init_db():
                     UNIQUE(provider, provider_user_id),
                     FOREIGN KEY (user_id) REFERENCES users(id)
                 )
-            """)
-        
-        # Usage events table
-        cursor.execute(f"""
-            CREATE TABLE IF NOT EXISTS usage_events (
-                id TEXT PRIMARY KEY,
-                job_id TEXT,
-                principal_type TEXT NOT NULL,
-                principal_id TEXT NOT NULL,
-                bucket TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                """
             )
-        """)
-        
-        if USE_POSTGRES:
-            cursor.execute(f"""
-                CREATE INDEX IF NOT EXISTS idx_usage_principal 
+
+            # Usage events table
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS usage_events (
+                    id TEXT PRIMARY KEY,
+                    job_id TEXT,
+                    principal_type TEXT NOT NULL,
+                    principal_id TEXT NOT NULL,
+                    bucket TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_usage_principal
                 ON usage_events(principal_type, principal_id, bucket, created_at)
-            """)
-        else:
-            cursor.execute(f"""
-                CREATE INDEX IF NOT EXISTS idx_usage_principal 
-                ON usage_events(principal_type, principal_id, bucket, created_at)
-            """)
-        
-        # Subscriptions table
-        cursor.execute(f"""
-            CREATE TABLE IF NOT EXISTS subscriptions (
-                user_id TEXT PRIMARY KEY,
-                provider TEXT NOT NULL,
-                customer_id TEXT,
-                subscription_id TEXT,
-                status TEXT NOT NULL,
-                period_start TEXT,
-                period_end TEXT,
-                plan_code TEXT,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users(id)
+                """
             )
-        """)
-        
-        cursor.execute(f"""
-            CREATE INDEX IF NOT EXISTS idx_sub_status 
-            ON subscriptions(status, period_end)
-        """)
-        
-        # Processed webhooks table (idempotency)
-        cursor.execute(f"""
-            CREATE TABLE IF NOT EXISTS processed_webhooks (
-                webhook_id TEXT PRIMARY KEY,
-                event_type TEXT NOT NULL,
-                received_at TEXT NOT NULL
+
+            # Subscriptions table
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    user_id TEXT PRIMARY KEY,
+                    provider TEXT NOT NULL,
+                    customer_id TEXT,
+                    subscription_id TEXT,
+                    status TEXT NOT NULL,
+                    period_start TEXT,
+                    period_end TEXT,
+                    plan_code TEXT,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (user_id) REFERENCES users(id)
+                )
+                """
             )
-        """)
-        
+
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_sub_status
+                ON subscriptions(status, period_end)
+                """
+            )
+
+            # Processed webhooks table (idempotency)
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS processed_webhooks (
+                    webhook_id TEXT PRIMARY KEY,
+                    event_type TEXT NOT NULL,
+                    received_at TEXT NOT NULL
+                )
+                """
+            )
+
+        finally:
+            if USE_POSTGRES:
+                cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
+
         print(f"Database initialized: {'PostgreSQL (Supabase)' if USE_POSTGRES else 'SQLite'}")
 
 
@@ -312,32 +282,35 @@ def link_oauth_identity(
     
     with get_db() as conn:
         cursor = conn.cursor()
-        
-        if USE_POSTGRES:
-            # Use PostgreSQL function for UPSERT
-            cursor.execute(
-                "SELECT upsert_oauth_identity(%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                (identity_id, provider, provider_user_id, user_id, 
-                 access_token, refresh_token, token_expires_at, now, now)
-            )
-        else:
-            # SQLite UPSERT syntax
-            query = """
-                INSERT INTO oauth_identities
-                (id, provider, provider_user_id, user_id, access_token, refresh_token,
-                 token_expires_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(provider, provider_user_id) DO UPDATE SET
-                    user_id = excluded.user_id,
-                    access_token = excluded.access_token,
-                    refresh_token = excluded.refresh_token,
-                    token_expires_at = excluded.token_expires_at,
-                    updated_at = excluded.updated_at
+
+        query = _format_query(
             """
-            cursor.execute(query, (
-                identity_id, provider, provider_user_id, user_id,
-                access_token, refresh_token, token_expires_at, now, now
-            ))
+            INSERT INTO oauth_identities
+            (id, provider, provider_user_id, user_id, access_token, refresh_token,
+             token_expires_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(provider, provider_user_id) DO UPDATE SET
+                user_id = excluded.user_id,
+                access_token = excluded.access_token,
+                refresh_token = excluded.refresh_token,
+                token_expires_at = excluded.token_expires_at,
+                updated_at = excluded.updated_at
+            """
+        )
+        cursor.execute(
+            query,
+            (
+                identity_id,
+                provider,
+                provider_user_id,
+                user_id,
+                access_token,
+                refresh_token,
+                token_expires_at,
+                now,
+                now,
+            ),
+        )
         
         return True
 
