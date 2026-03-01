@@ -353,6 +353,65 @@ def count_usage_in_bucket(
         return row['count'] if row else 0
 
 
+def get_usage_count(
+    principal_type: str,
+    principal_id: str,
+    bucket: str,
+    since: Optional[str] = None,
+) -> int:
+    """Get usage count for a principal/bucket, optionally since timestamp."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        if since:
+            query = _format_query(
+                """
+                SELECT COUNT(*) as count FROM usage_events
+                WHERE principal_type = ? AND principal_id = ? AND bucket = ? AND created_at >= ?
+                """
+            )
+            cursor.execute(query, (principal_type, principal_id, bucket, since))
+        else:
+            query = _format_query(
+                """
+                SELECT COUNT(*) as count FROM usage_events
+                WHERE principal_type = ? AND principal_id = ? AND bucket = ?
+                """
+            )
+            cursor.execute(query, (principal_type, principal_id, bucket))
+
+        row = cursor.fetchone()
+        return row['count'] if row else 0
+
+
+def get_paid_usage_count(
+    user_id: str,
+    since_timestamp: Optional[str] = None,
+) -> int:
+    """Get paid usage count, optionally for current billing period."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+        if since_timestamp:
+            query = _format_query(
+                """
+                SELECT COUNT(*) as count FROM usage_events
+                WHERE principal_type = 'user' AND principal_id = ?
+                AND bucket = 'paid' AND created_at >= ?
+                """
+            )
+            cursor.execute(query, (user_id, since_timestamp))
+        else:
+            query = _format_query(
+                """
+                SELECT COUNT(*) as count FROM usage_events
+                WHERE principal_type = 'user' AND principal_id = ? AND bucket = 'paid'
+                """
+            )
+            cursor.execute(query, (user_id,))
+
+        row = cursor.fetchone()
+        return row['count'] if row else 0
+
+
 def set_subscription(
     user_id: str,
     provider: str,
@@ -398,6 +457,34 @@ def get_subscription(user_id: str) -> Optional[Dict[str, Any]]:
         if row:
             return dict(row)
         return None
+
+
+def is_subscription_active(user_id: str) -> bool:
+    """Check if user has an active subscription."""
+    from datetime import datetime as dt
+
+    sub = get_subscription(user_id)
+    if not sub:
+        return False
+
+    status = (sub.get('status') or '').lower()
+    if status not in ('active', 'trialing'):
+        return False
+
+    period_end = sub.get('period_end')
+    if period_end:
+        try:
+            end_date = dt.fromisoformat(str(period_end).replace('Z', '+00:00'))
+            if end_date.tzinfo is not None:
+                if dt.now(end_date.tzinfo) > end_date:
+                    return False
+            else:
+                if dt.utcnow() > end_date:
+                    return False
+        except (ValueError, TypeError):
+            pass
+
+    return True
 
 
 def record_webhook(webhook_id: str, event_type: str) -> bool:

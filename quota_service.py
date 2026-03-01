@@ -8,12 +8,22 @@ import hashlib
 import asyncio
 from typing import Optional, Dict, Any, Tuple
 
-from auth_quota_store import (
-    get_usage_count,
-    get_paid_usage_count,
-    is_subscription_active,
-    record_usage_event,
-)
+try:
+    from db_store import (
+        get_usage_count,
+        get_paid_usage_count,
+        is_subscription_active,
+        record_usage_event,
+        get_subscription,
+    )
+except ImportError:
+    from auth_quota_store import (
+        get_usage_count,
+        get_paid_usage_count,
+        is_subscription_active,
+        record_usage_event,
+        get_subscription,
+    )
 
 
 # Quota limits (env-configurable)
@@ -86,7 +96,6 @@ async def check_quota(
         if user_id:
             subscription_active = is_subscription_active(user_id)
             if subscription_active:
-                from auth_quota_store import get_subscription
                 sub = get_subscription(user_id)
                 if sub and sub.get('period_start'):
                     paid_period_start = sub['period_start']
