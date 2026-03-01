@@ -147,6 +147,7 @@ DODO_API_KEY = os.environ.get("DODO_PAYMENTS_API_KEY", "")
 DODO_ENV = os.environ.get("DODO_PAYMENTS_ENVIRONMENT", "test_mode")
 DODO_WEBHOOK_KEY = os.environ.get("DODO_PAYMENTS_WEBHOOK_KEY", "")
 DODO_SUBSCRIPTION_PRODUCT_ID = os.environ.get("DODO_SUBSCRIPTION_PRODUCT_ID", "")
+GOOGLE_ANALYTICS_ID = os.environ.get("GOOGLE_ANALYTICS_ID", "").strip()
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:3000")
 if PUBLIC_BASE_URL.endswith("/"):
     PUBLIC_BASE_URL = PUBLIC_BASE_URL[:-1]
@@ -154,6 +155,7 @@ if PUBLIC_BASE_URL.endswith("/"):
 logger.info(f"Session enabled: {bool(SESSION_SECRET)}")
 logger.info(f"Google OAuth enabled: {bool(OAUTH_GOOGLE_CLIENT_ID)}")
 logger.info(f"Dodo Payments enabled: {bool(DODO_API_KEY)}")
+logger.info(f"Google Analytics enabled: {bool(GOOGLE_ANALYTICS_ID)}")
 
 # Ensure temp directory exists
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -586,10 +588,10 @@ async def add_security_headers(request, call_next):
         "object-src 'none'; "
         "frame-ancestors 'none'; "
         "form-action 'self'; "
-        "script-src 'self' 'unsafe-inline' cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com threejs.org; "
+        "script-src 'self' 'unsafe-inline' cdn.tailwindcss.com cdnjs.cloudflare.com unpkg.com threejs.org www.googletagmanager.com; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        "img-src 'self' blob: data: https://lh3.googleusercontent.com; "
-        "connect-src 'self' https://api.bfl.ai https://auth.bfl.ai; "
+        "img-src 'self' blob: data: https://lh3.googleusercontent.com https://www.google-analytics.com; "
+        "connect-src 'self' https://api.bfl.ai https://auth.bfl.ai https://www.google-analytics.com https://region1.google-analytics.com https://stats.g.doubleclick.net; "
         "font-src 'self' https://fonts.gstatic.com; "
     )
     if not is_dev:
@@ -2377,7 +2379,8 @@ async def get_frontend(request: Request):
         "config": {
             "app_name": "CoastGen",
             "default_stamp": "Abhishek Does Stuff",
-            "max_stamp_length": 50
+            "max_stamp_length": 50,
+            "google_analytics_id": GOOGLE_ANALYTICS_ID,
         }
     })
 

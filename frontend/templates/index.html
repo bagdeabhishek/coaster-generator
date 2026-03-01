@@ -5,6 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CoastGen</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    {% if config.google_analytics_id %}
+    <script async src="https://www.googletagmanager.com/gtag/js?id={{ config.google_analytics_id }}"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);} 
+        gtag('js', new Date());
+        gtag('config', '{{ config.google_analytics_id }}', {
+            anonymize_ip: true,
+            transport_type: 'beacon'
+        });
+    </script>
+    {% endif %}
     <script>
         tailwind.config = {
             darkMode: 'class',
