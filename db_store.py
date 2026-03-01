@@ -122,32 +122,34 @@ def init_db():
                 )
             """)
             
-            # PostgreSQL UPSERT syntax - wrapped in try/except to handle concurrent updates
-            try:
-                cursor.execute("""
-                    CREATE OR REPLACE FUNCTION upsert_oauth_identity(
-                        p_id TEXT, p_provider TEXT, p_provider_user_id TEXT, p_user_id TEXT,
-                        p_access_token TEXT, p_refresh_token TEXT, p_token_expires_at INTEGER,
-                        p_created_at TEXT, p_updated_at TEXT
-                    ) RETURNS VOID AS $$
-                    BEGIN
-                        INSERT INTO oauth_identities
-                            (id, provider, provider_user_id, user_id, access_token, refresh_token,
-                             token_expires_at, created_at, updated_at)
-                        VALUES (p_id, p_provider, p_provider_user_id, p_user_id, p_access_token,
-                                p_refresh_token, p_token_expires_at, p_created_at, p_updated_at)
-                        ON CONFLICT (provider, provider_user_id) DO UPDATE SET
-                            user_id = EXCLUDED.user_id,
-                            access_token = EXCLUDED.access_token,
-                            refresh_token = EXCLUDED.refresh_token,
-                            token_expires_at = EXCLUDED.token_expires_at,
-                            updated_at = EXCLUDED.updated_at;
-                    END;
-                    $$ LANGUAGE plpgsql;
-                """)
-            except Exception:
-                # Function might already exist due to race condition with other workers
-                pass
+            # PostgreSQL UPSERT syntax - only create if not exists
+            # Check if function exists first to avoid race conditions
+            cursor.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'upsert_oauth_identity') THEN
+                        CREATE FUNCTION upsert_oauth_identity(
+                            p_id TEXT, p_provider TEXT, p_provider_user_id TEXT, p_user_id TEXT,
+                            p_access_token TEXT, p_refresh_token TEXT, p_token_expires_at INTEGER,
+                            p_created_at TEXT, p_updated_at TEXT
+                        ) RETURNS VOID AS $$
+                        BEGIN
+                            INSERT INTO oauth_identities
+                                (id, provider, provider_user_id, user_id, access_token, refresh_token,
+                                 token_expires_at, created_at, updated_at)
+                            VALUES (p_id, p_provider, p_provider_user_id, p_user_id, p_access_token,
+                                    p_refresh_token, p_token_expires_at, p_created_at, p_updated_at)
+                            ON CONFLICT (provider, provider_user_id) DO UPDATE SET
+                                user_id = EXCLUDED.user_id,
+                                access_token = EXCLUDED.access_token,
+                                refresh_token = EXCLUDED.refresh_token,
+                                token_expires_at = EXCLUDED.token_expires_at,
+                                updated_at = EXCLUDED.updated_at;
+                        END;
+                        $$ LANGUAGE plpgsql;
+                    END IF;
+                END $$;
+            """)
         else:
             # SQLite syntax
             cursor.execute(f"""
