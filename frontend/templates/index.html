@@ -12,17 +12,30 @@
                 extend: {
                     colors: {
                         primary: {
-                            50: '#f5f3ff',
-                            100: '#ede9fe',
-                            200: '#ddd6fe',
-                            300: '#c4b5fd',
-                            400: '#a78bfa',
-                            500: '#8b5cf6',
-                            600: '#7c3aed',
-                            700: '#6d28d9',
-                            800: '#5b21b6',
-                            900: '#4c1d95',
-                            950: '#2e1065',
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            200: '#bae6fd',
+                            300: '#7dd3fc',
+                            400: '#38bdf8',
+                            500: '#06b6d4',
+                            600: '#0891b2',
+                            700: '#0e7490',
+                            800: '#155e75',
+                            900: '#164e63',
+                            950: '#083344',
+                        },
+                        navy: {
+                            50: '#f1f5f9',
+                            100: '#e2e8f0',
+                            200: '#cbd5e1',
+                            300: '#94a3b8',
+                            400: '#64748b',
+                            500: '#475569',
+                            600: '#334155',
+                            700: '#1e3a5f',
+                            800: '#1e293b',
+                            900: '#0f172a',
+                            950: '#020617',
                         }
                     },
                     animation: {
@@ -59,6 +72,13 @@
             <div class="flex items-center gap-3">
                 <img src="/static/logo.png" alt="CoastGen Logo" class="h-10 w-auto">
             </div>
+            
+            <!-- Title & Tagline -->
+            <div class="hidden md:flex flex-col items-end">
+                <h1 class="text-2xl font-bold tracking-tight text-navy-700 dark:text-white">CoastGen</h1>
+                <p class="text-sm font-medium text-primary-500">Transform Memories into 3D Keepsakes</p>
+            </div>
+            
             <div class="flex items-center gap-3">
                 <div id="authSection" class="flex items-center gap-2">
                     <button id="loginGoogleBtn" class="hidden px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors">
