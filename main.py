@@ -179,6 +179,8 @@ class Job:
     params: Optional['ProcessRequest'] = None  # Store params for confirmation step
     api_key: Optional[str] = None  # User-provided BFL API key (optional)
     stamp_text: str = "Abhishek Does Stuff"  # Text to display on coaster stamp
+    owner_user_id: Optional[str] = None  # Authenticated owner id
+    owner_anon_id: Optional[str] = None  # Anonymous owner fingerprint hash
     
     def to_dict(self) -> dict:
         """Convert job to dictionary for JSON serialization."""
@@ -193,7 +195,9 @@ class Job:
             "preview_image_path": self.preview_image_path,
             "params": self.params.dict() if self.params else None,
             "api_key": self.api_key,
-            "stamp_text": self.stamp_text
+            "stamp_text": self.stamp_text,
+            "owner_user_id": self.owner_user_id,
+            "owner_anon_id": self.owner_anon_id,
         }
 
     @classmethod
@@ -208,7 +212,9 @@ class Job:
             error=data.get("error"),
             preview_image_path=data.get("preview_image_path"),
             api_key=data.get("api_key"),
-            stamp_text=data.get("stamp_text", "Abhishek Does Stuff")
+            stamp_text=data.get("stamp_text", "Abhishek Does Stuff"),
+            owner_user_id=data.get("owner_user_id"),
+            owner_anon_id=data.get("owner_anon_id"),
         )
         job.created_at = datetime.fromisoformat(data["created_at"])
         if data.get("params"):
@@ -659,6 +665,9 @@ async def login_google(request: Request):
 @app.get("/auth/test-oauth-connection")
 async def test_oauth_connection():
     """Test OAuth network connectivity directly."""
+    if ENVIRONMENT != "development":
+        raise HTTPException(status_code=404, detail="Not found")
+
     import httpx
     import asyncio
     
@@ -902,12 +911,48 @@ def validate_stamp_text(text: str) -> str:
 
 def get_client_ip(request: Request) -> str:
     """Extract client IP from request, handling proxies."""
+    cf_ip = request.headers.get("CF-Connecting-IP")
+    if cf_ip:
+        return cf_ip.strip()
+
+    true_ip = request.headers.get("True-Client-IP")
+    if true_ip:
+        return true_ip.strip()
+
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
         return forwarded.split(",")[0].strip()
     elif request.client:
         return request.client.host
     return "unknown"
+
+
+def get_anon_owner_id(request: Request) -> str:
+    """Build a stable anonymous owner id from fingerprint or client IP."""
+    device_fingerprint = request.headers.get("X-Device-Fingerprint")
+    source = device_fingerprint or get_client_ip(request) or "unknown"
+    return hashlib.sha256(source.encode()).hexdigest()[:32]
+
+
+def enforce_job_access(request: Request, job: Job) -> None:
+    """Ensure requester is authorized to access this job."""
+    session_user_id = request.session.get("user_id")
+
+    # Authenticated jobs must match authenticated owner.
+    if job.owner_user_id:
+        if session_user_id != job.owner_user_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return
+
+    # Anonymous jobs must match anonymous owner hash.
+    if job.owner_anon_id:
+        if get_anon_owner_id(request) != job.owner_anon_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        return
+
+    # Backward compatibility for old jobs created before ownership fields existed.
+    # Keep access behavior unchanged for legacy jobs.
+    return
 
 
 @app.on_event("startup")
@@ -1999,7 +2044,12 @@ async def process_image(
 
     # Create job (don't store API key in job for security)
     job_id = str(uuid.uuid4())
-    job = Job(job_id=job_id, stamp_text=stamp_text)
+    job = Job(
+        job_id=job_id,
+        stamp_text=stamp_text,
+        owner_user_id=user_id,
+        owner_anon_id=None if user_id else get_anon_owner_id(request),
+    )
     JobStore.save_job(job)
     logger.info(f"✓ Job created: {job_id} with stamp: {stamp_text}")
 
@@ -2041,11 +2091,13 @@ async def process_image(
 
 
 @app.get("/api/status/{job_id}", response_model=StatusResponse)
-async def get_status(job_id: str):
+async def get_status(job_id: str, request: Request):
     """Get the current status of a job."""
     job = JobStore.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    enforce_job_access(request, job)
     
     response = StatusResponse(
         job_id=job.job_id,
@@ -2067,11 +2119,13 @@ async def get_status(job_id: str):
 
 
 @app.get("/api/download/{job_id}")
-async def download_coaster(job_id: str):
+async def download_coaster(job_id: str, request: Request):
     """Download the combined coaster 3MF file."""
     job = JobStore.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    enforce_job_access(request, job)
 
     if job.status != "completed" or "combined_3mf" not in job.files:
         raise HTTPException(status_code=400, detail="Coaster file not available")
@@ -2088,11 +2142,13 @@ async def download_coaster(job_id: str):
 
 
 @app.get("/api/download/{job_id}/body")
-async def download_body_stl(job_id: str):
+async def download_body_stl(job_id: str, request: Request):
     """Download the coaster body STL file (for viewer)."""
     job = JobStore.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    enforce_job_access(request, job)
 
     if job.status != "completed" or "body" not in job.files:
         raise HTTPException(status_code=400, detail="Body file not available")
@@ -2109,11 +2165,13 @@ async def download_body_stl(job_id: str):
 
 
 @app.get("/api/download/{job_id}/logos")
-async def download_logos_stl(job_id: str):
+async def download_logos_stl(job_id: str, request: Request):
     """Download the coaster logos STL file (for viewer)."""
     job = JobStore.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    enforce_job_access(request, job)
 
     if job.status != "completed" or "logos" not in job.files:
         raise HTTPException(status_code=400, detail="Logos file not available")
@@ -2130,13 +2188,15 @@ async def download_logos_stl(job_id: str):
 
 
 @app.get("/api/preview-image/{job_id}")
-async def get_preview_image(job_id: str):
+async def get_preview_image(job_id: str, request: Request):
     """Get the BFL generated image for review (before confirmation)."""
     from starlette.responses import StreamingResponse
     
     job = JobStore.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    enforce_job_access(request, job)
     
     if job.status != "review":
         raise HTTPException(status_code=400, detail="Preview image not available")
@@ -2155,11 +2215,13 @@ async def get_preview_image(job_id: str):
 
 
 @app.post("/api/confirm/{job_id}")
-async def confirm_job(job_id: str, background_tasks: BackgroundTasks):
+async def confirm_job(job_id: str, request: Request, background_tasks: BackgroundTasks):
     """Confirm the generated image and proceed with vectorization and 3D generation."""
     job = JobStore.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    enforce_job_access(request, job)
     
     if job.status != "review":
         raise HTTPException(status_code=400, detail="Job is not in review state")
@@ -2190,6 +2252,8 @@ async def retry_job(
     job = JobStore.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    enforce_job_access(request, job)
     
     if job.status != "review":
         raise HTTPException(status_code=400, detail="Job is not in review state")
