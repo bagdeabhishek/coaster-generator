@@ -444,8 +444,13 @@ def get_rate_limit_key(request: Request) -> str:
     else:
         client_ip = "unknown"
     
-    # Get device fingerprint from header
-    device_fp = request.headers.get("X-Device-Fingerprint", "")
+    # Prefer server-issued anonymous session id to avoid spoofable headers
+    anon_session_id = request.session.get("anon_id")
+    if anon_session_id:
+        device_fp = f"session:{anon_session_id}"
+    else:
+        # Fallback to client-provided fingerprint header
+        device_fp = request.headers.get("X-Device-Fingerprint", "")
     
     # Combine for unique key
     if device_fp:
@@ -872,10 +877,11 @@ async def get_usage(request: Request):
     """Get user's quota information."""
     user_id = request.session.get("user_id")
     fingerprint = request.headers.get("X-Device-Fingerprint")
-    ip_header = request.headers.get("X-Forwarded-For")
+    anon_quota_id = None if user_id else f"session:{get_or_create_anon_session_id(request)}"
+    ip_header = get_client_ip(request)
     
     allowed, message, retry_after, usage_info = await check_quota(
-        fingerprint, user_id, ip_header
+        anon_quota_id or fingerprint, user_id, ip_header
     )
     
     return {
@@ -1987,6 +1993,7 @@ async def process_image(
     # Resolve identity context
     user_id = request.session.get("user_id")
     device_fingerprint = request.headers.get("X-Device-Fingerprint")
+    anon_quota_id = None if user_id else f"session:{get_or_create_anon_session_id(request)}"
     client_ip = get_client_ip(request)
 
     # Check if bypassing with own API key
@@ -2045,7 +2052,7 @@ async def process_image(
     usage_info = {}
     if not bypass_limit:
         quota_allowed, quota_message, _, usage_info = await check_quota(
-            device_fingerprint,
+            anon_quota_id or device_fingerprint,
             user_id,
             client_ip,
         )
@@ -2076,7 +2083,7 @@ async def process_image(
         quota_bucket = usage_info.get("bucket")
         if not quota_bucket:
             raise HTTPException(status_code=500, detail="Quota decision failed")
-        quota_event_id = await consume_quota(job_id, device_fingerprint, user_id, quota_bucket)
+        quota_event_id = await consume_quota(job_id, anon_quota_id or device_fingerprint, user_id, quota_bucket)
         if not quota_event_id:
             raise HTTPException(status_code=500, detail="Unable to reserve quota at this time")
     else:
@@ -2287,6 +2294,7 @@ async def retry_job(
 
     user_id = request.session.get("user_id")
     device_fingerprint = request.headers.get("X-Device-Fingerprint")
+    anon_quota_id = None if user_id else f"session:{get_or_create_anon_session_id(request)}"
     client_ip = get_client_ip(request)
 
     # In retry, we might not have the API key in the form, but if the original used one, we should ideally bypass.
@@ -2296,7 +2304,7 @@ async def retry_job(
     
     usage_info = {}
     quota_allowed, quota_message, _, usage_info = await check_quota(
-        device_fingerprint,
+        anon_quota_id or device_fingerprint,
         user_id,
         client_ip,
     )
@@ -2322,7 +2330,7 @@ async def retry_job(
     quota_bucket = usage_info.get("bucket")
     if not quota_bucket:
         raise HTTPException(status_code=500, detail="Quota decision failed")
-    quota_event_id = await consume_quota(job_id, device_fingerprint, user_id, quota_bucket)
+    quota_event_id = await consume_quota(job_id, anon_quota_id or device_fingerprint, user_id, quota_bucket)
     if not quota_event_id:
         raise HTTPException(status_code=500, detail="Unable to reserve quota at this time")
     
