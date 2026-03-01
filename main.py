@@ -38,6 +38,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from pydantic import BaseModel
 import concurrent.futures
+from tools.coaster_gen import CoasterGenerator
 
 # Auth and billing
 try:
@@ -1700,18 +1701,39 @@ async def process_coaster_job(
             job.error = str(e)
             JobStore.save_job(job)
 
-def run_3d_processing_pipeline(flattened_image: Image.Image, params: ProcessRequest, job_id: str):
+def run_3d_processing_pipeline(flattened_image: bytes, params: ProcessRequest, job_id: str):
     """
     Pure synchronous function that runs the heavy CPU bounds tasks.
     Suitable for running inside a ProcessPoolExecutor.
     """
-    # Step 1: Vectorize
-    svg_string = vectorize_image(flattened_image)
-    
-    # Step 2: Generate 3D
-    coaster_3mf_path, body_stl_path, logos_stl_path = generate_3d_coaster(svg_string, params, job_id)
-    
-    return coaster_3mf_path, body_stl_path, logos_stl_path
+    generator = CoasterGenerator(
+        diameter=params.diameter,
+        thickness=params.thickness,
+        logo_depth=params.logo_depth,
+        scale=params.scale,
+        flip_horizontal=params.flip_horizontal,
+        top_rotate=params.top_rotate,
+        bottom_rotate=params.bottom_rotate,
+    )
+
+    timestamp = datetime.now().strftime("%H%M%S")
+    file_prefix = f"{job_id}_{timestamp}"
+    temp_input_path = os.path.join(TEMP_DIR, f"{file_prefix}_input.png")
+
+    with open(temp_input_path, "wb") as f:
+        f.write(flattened_image)
+
+    try:
+        return generator.generate_coaster(
+            input_image_path=temp_input_path,
+            output_dir=TEMP_DIR,
+            stamp_text="",
+            is_preview=False,
+            file_prefix=file_prefix,
+        )
+    finally:
+        if os.path.exists(temp_input_path):
+            os.remove(temp_input_path)
 
 
 async def process_vectorization_3d(job_id: str):

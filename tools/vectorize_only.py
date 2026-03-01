@@ -1,22 +1,9 @@
 #!/usr/bin/env python3
 import argparse
-import importlib.util
 from pathlib import Path
 from typing import Optional
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-MAIN_PATH = REPO_ROOT / "main.py"
-if not MAIN_PATH.exists():
-    raise SystemExit(f"main.py not found at {MAIN_PATH}")
-
-spec = importlib.util.spec_from_file_location("coaster_main", MAIN_PATH)
-if spec is None or spec.loader is None:
-    raise SystemExit("Failed to load main.py")
-
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-
-vectorize_image = module.vectorize_image
+from tools.coaster_gen import CoasterGenerator
 
 
 def find_latest_download_image(downloads_dir: Path) -> Optional[Path]:
@@ -48,7 +35,8 @@ def main():
         raise SystemExit(f"Input image not found: {input_path}")
 
     image_bytes = input_path.read_bytes()
-    svg_content = vectorize_image(image_bytes)
+    generator = CoasterGenerator()
+    svg_content = generator.vectorize_image(image_bytes, str(output_path.parent))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(svg_content, encoding="utf-8")

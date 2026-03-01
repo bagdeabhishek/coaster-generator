@@ -83,6 +83,10 @@ class CoasterGenerator:
             if os.path.exists(temp_svg_path):
                 os.remove(temp_svg_path)
 
+    def vectorize_image(self, image_bytes: bytes, output_dir: str) -> str:
+        """Public wrapper for PNG/JPG bytes -> SVG string."""
+        return self._vectorize_image(image_bytes, output_dir)
+
     def _build_meshes_from_svg(self, svg_string: str) -> Tuple[trimesh.Trimesh, trimesh.Trimesh]:
         p = self.params
 
@@ -280,22 +284,16 @@ class CoasterGenerator:
 </Types>""",
             )
 
-    def generate_coaster(
+    def generate_from_svg(
         self,
-        input_image_path: str,
+        svg_string: str,
         output_dir: str,
-        stamp_text: str = "",
-        is_preview: bool = False,
+        file_prefix: str | None = None,
     ) -> Tuple[str, str, str]:
-        del stamp_text, is_preview
-
-        with open(input_image_path, "rb") as f:
-            image_bytes = f.read()
-
-        svg_string = self._vectorize_image(image_bytes, output_dir)
+        """Generate 3MF + STL files from SVG string."""
         base_mesh, logos_mesh = self._build_meshes_from_svg(svg_string)
 
-        base_name = uuid.uuid4().hex[:12]
+        base_name = file_prefix or uuid.uuid4().hex[:12]
         output_3mf_path = os.path.join(output_dir, f"{base_name}_coaster.3mf")
         body_stl_path = os.path.join(output_dir, f"{base_name}_Body.stl")
         logos_stl_path = os.path.join(output_dir, f"{base_name}_Logos.stl")
@@ -305,3 +303,19 @@ class CoasterGenerator:
         self._export_three_mf(base_mesh, logos_mesh, output_3mf_path)
 
         return output_3mf_path, body_stl_path, logos_stl_path
+
+    def generate_coaster(
+        self,
+        input_image_path: str,
+        output_dir: str,
+        stamp_text: str = "",
+        is_preview: bool = False,
+        file_prefix: str | None = None,
+    ) -> Tuple[str, str, str]:
+        del stamp_text, is_preview
+
+        with open(input_image_path, "rb") as f:
+            image_bytes = f.read()
+
+        svg_string = self._vectorize_image(image_bytes, output_dir)
+        return self.generate_from_svg(svg_string, output_dir, file_prefix=file_prefix)
