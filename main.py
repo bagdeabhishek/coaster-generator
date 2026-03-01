@@ -178,6 +178,7 @@ class Job:
     preview_image_path: Optional[str] = None  # Path to saved preview image
     params: Optional['ProcessRequest'] = None  # Store params for confirmation step
     api_key: Optional[str] = None  # User-provided BFL API key (optional)
+    uses_own_api_key: bool = False  # Whether user supplied their own BFL key
     stamp_text: str = "Abhishek Does Stuff"  # Text to display on coaster stamp
     owner_user_id: Optional[str] = None  # Authenticated owner id
     owner_anon_id: Optional[str] = None  # Anonymous owner fingerprint hash
@@ -195,6 +196,7 @@ class Job:
             "preview_image_path": self.preview_image_path,
             "params": self.params.dict() if self.params else None,
             "api_key": self.api_key,
+            "uses_own_api_key": self.uses_own_api_key,
             "stamp_text": self.stamp_text,
             "owner_user_id": self.owner_user_id,
             "owner_anon_id": self.owner_anon_id,
@@ -212,6 +214,7 @@ class Job:
             error=data.get("error"),
             preview_image_path=data.get("preview_image_path"),
             api_key=data.get("api_key"),
+            uses_own_api_key=bool(data.get("uses_own_api_key", False)),
             stamp_text=data.get("stamp_text", "Abhishek Does Stuff"),
             owner_user_id=data.get("owner_user_id"),
             owner_anon_id=data.get("owner_anon_id"),
@@ -1850,10 +1853,17 @@ async def process_vectorization_3d(job_id: str):
         await update_job_status(job_id, "processing_3d", 75, "Starting 3D generation...")
         
         # Check active local tasks to decide routing
+        local_slot_reserved = False
+        force_local = bool(getattr(job, "uses_own_api_key", False))
         async with tasks_lock:
             current_active = active_local_tasks
-            if current_active < MAX_LOCAL_WORKERS:
+            if force_local:
                 active_local_tasks += 1
+                local_slot_reserved = True
+                route_to_modal = False
+            elif current_active < MAX_LOCAL_WORKERS:
+                active_local_tasks += 1
+                local_slot_reserved = True
                 route_to_modal = False
             else:
                 route_to_modal = True
@@ -1898,7 +1908,9 @@ async def process_vectorization_3d(job_id: str):
                 logger.info(f"✓ Cloud 3D generation complete via Modal")
                 
             else:
-                if route_to_modal:
+                if force_local:
+                    logger.info("ROUTING LOCALLY: User-supplied BFL API key forces local processing.")
+                elif route_to_modal:
                     logger.warning("ROUTING LOCALLY: Local pool full, but Modal fallback disabled. Queuing locally...")
                 else:
                     logger.info("ROUTING LOCALLY: Processing on M900 Tiny...")
@@ -1916,9 +1928,9 @@ async def process_vectorization_3d(job_id: str):
                 )
                 logger.info(f"✓ Local 3D generation complete")
         finally:
-            if not route_to_modal or not USE_MODAL_FALLBACK:
+            if local_slot_reserved:
                 async with tasks_lock:
-                    active_local_tasks -= 1
+                    active_local_tasks = max(0, active_local_tasks - 1)
         
         logger.info(f"  - 3MF: {coaster_3mf_path}")
         logger.info(f"  - Body STL: {body_stl_path}")
@@ -2072,6 +2084,7 @@ async def process_image(
     job = Job(
         job_id=job_id,
         stamp_text=stamp_text,
+        uses_own_api_key=using_own_key,
         owner_user_id=user_id,
         owner_anon_id=None if user_id else get_or_create_anon_session_id(request),
     )
