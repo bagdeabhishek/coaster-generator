@@ -934,6 +934,17 @@ def get_anon_owner_id(request: Request) -> str:
     return hashlib.sha256(source.encode()).hexdigest()[:32]
 
 
+def get_or_create_anon_session_id(request: Request) -> str:
+    """Get persistent anonymous session id, creating one if missing."""
+    anon_id = request.session.get("anon_id")
+    if anon_id:
+        return anon_id
+
+    anon_id = uuid.uuid4().hex
+    request.session["anon_id"] = anon_id
+    return anon_id
+
+
 def enforce_job_access(request: Request, job: Job) -> None:
     """Ensure requester is authorized to access this job."""
     session_user_id = request.session.get("user_id")
@@ -946,9 +957,16 @@ def enforce_job_access(request: Request, job: Job) -> None:
 
     # Anonymous jobs must match anonymous owner hash.
     if job.owner_anon_id:
-        if get_anon_owner_id(request) != job.owner_anon_id:
-            raise HTTPException(status_code=403, detail="Forbidden")
-        return
+        # Preferred path: persistent anonymous session ownership.
+        session_anon_id = request.session.get("anon_id")
+        if session_anon_id and session_anon_id == job.owner_anon_id:
+            return
+
+        # Backward compatibility for legacy jobs using hash-based owner id.
+        if get_anon_owner_id(request) == job.owner_anon_id:
+            return
+
+        raise HTTPException(status_code=403, detail="Forbidden")
 
     # Backward compatibility for old jobs created before ownership fields existed.
     # Keep access behavior unchanged for legacy jobs.
@@ -2048,7 +2066,7 @@ async def process_image(
         job_id=job_id,
         stamp_text=stamp_text,
         owner_user_id=user_id,
-        owner_anon_id=None if user_id else get_anon_owner_id(request),
+        owner_anon_id=None if user_id else get_or_create_anon_session_id(request),
     )
     JobStore.save_job(job)
     logger.info(f"✓ Job created: {job_id} with stamp: {stamp_text}")
