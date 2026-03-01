@@ -40,18 +40,37 @@ from pydantic import BaseModel
 import concurrent.futures
 
 # Auth and billing
-from auth_quota_store import (
-    init_db,
-    create_user,
-    get_user_by_email,
-    get_user_by_id,
-    get_user_by_oauth,
-    link_oauth_identity,
-    set_subscription,
-    record_webhook,
-    is_webhook_processed,
-    clear_all_quotas,
-)
+try:
+    from db_store import (
+        init_db,
+        create_user,
+        get_user_by_email,
+        get_user_by_id,
+        get_user_by_oauth,
+        link_oauth_identity,
+        set_subscription,
+        record_webhook,
+        is_webhook_processed,
+        clear_all_quotas,
+        USE_POSTGRES
+    )
+    print(f"Using {'PostgreSQL' if USE_POSTGRES else 'SQLite'} database")
+except ImportError:
+    # Fallback to old module for backward compatibility
+    from auth_quota_store import (
+        init_db,
+        create_user,
+        get_user_by_email,
+        get_user_by_id,
+        get_user_by_oauth,
+        link_oauth_identity,
+        set_subscription,
+        record_webhook,
+        is_webhook_processed,
+        clear_all_quotas,
+    )
+    USE_POSTGRES = False
+    print("Using legacy SQLite database")
 from quota_service import check_quota, consume_quota, PAID_MONTHLY_LIMIT
 
 # Security imports

@@ -19,3 +19,4 @@ Authlib==1.3.1
 dodopayments==1.84.0
 modal==0.62.96
 itsdangerous==2.2.0
+psycopg2-binary==2.9.9
