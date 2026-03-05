@@ -148,6 +148,7 @@ DODO_ENV = os.environ.get("DODO_PAYMENTS_ENVIRONMENT", "test_mode")
 DODO_WEBHOOK_KEY = os.environ.get("DODO_PAYMENTS_WEBHOOK_KEY", "")
 DODO_SUBSCRIPTION_PRODUCT_ID = os.environ.get("DODO_SUBSCRIPTION_PRODUCT_ID", "")
 GOOGLE_ANALYTICS_ID = os.environ.get("GOOGLE_ANALYTICS_ID", "").strip()
+SUPPORT_CONTACT_EMAIL = os.environ.get("SUPPORT_CONTACT_EMAIL", "admin@abhishekdoesstuff.com").strip()
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:3000")
 if PUBLIC_BASE_URL.endswith("/"):
     PUBLIC_BASE_URL = PUBLIC_BASE_URL[:-1]
@@ -156,6 +157,35 @@ logger.info(f"Session enabled: {bool(SESSION_SECRET)}")
 logger.info(f"Google OAuth enabled: {bool(OAUTH_GOOGLE_CLIENT_ID)}")
 logger.info(f"Dodo Payments enabled: {bool(DODO_API_KEY)}")
 logger.info(f"Google Analytics enabled: {bool(GOOGLE_ANALYTICS_ID)}")
+
+
+def is_quota_related_error(message: str) -> bool:
+    """Return True if the message looks like quota/rate-limit exhaustion."""
+    text = (message or "").lower()
+    markers = [
+        "quota",
+        "rate limit",
+        "too many requests",
+        "insufficient credit",
+        "insufficient credits",
+        "credit balance",
+        "usage limit",
+        "billing hard limit",
+        "payment required",
+        "429",
+        "resource_exhausted",
+    ]
+    return any(marker in text for marker in markers)
+
+
+def with_support_contact(message: str) -> str:
+    """Append support contact guidance once."""
+    base = (message or "").strip()
+    if not base:
+        base = "Quota exceeded."
+    if SUPPORT_CONTACT_EMAIL.lower() in base.lower():
+        return base
+    return f"{base} Contact {SUPPORT_CONTACT_EMAIL} for quota increase help."
 
 # Ensure temp directory exists
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -1162,7 +1192,10 @@ async def bfl_flux_process(image_bytes: bytes, api_key: str, stamp_text: str = "
                 text = await response.text()
                 logger.error(f"BFL API error: {response.status}")
                 logger.error(f"Response text: {text[:500]}")
-                raise Exception(f"BFL API error: {response.status} - {text}")
+                provider_error = f"BFL API error: {response.status} - {text}"
+                if response.status == 429 or is_quota_related_error(provider_error):
+                    provider_error = with_support_contact(provider_error)
+                raise Exception(provider_error)
             result = await response.json()
     
     logger.info(f"BFL job submitted successfully")
@@ -1234,7 +1267,10 @@ async def bfl_flux_process(image_bytes: bytes, api_key: str, stamp_text: str = "
                 raise Exception("No image URL in completed result")
             
             elif status in ["Failed", "Error"]:
-                raise Exception(f"BFL job failed: {poll_result.get('error', 'Unknown error')}")
+                provider_error = f"BFL job failed: {poll_result.get('error', 'Unknown error')}"
+                if is_quota_related_error(provider_error):
+                    provider_error = with_support_contact(provider_error)
+                raise Exception(provider_error)
             
             # Continue polling for Pending, Processing, etc.
     
@@ -1778,10 +1814,14 @@ async def process_coaster_job(
         logger.info("="*60)
         
     except Exception as e:
+        error_message = str(e)
+        if is_quota_related_error(error_message):
+            error_message = with_support_contact(error_message)
+
         logger.error("="*60)
         logger.error(f"JOB {job_id} FAILED!")
         logger.error(f"Error type: {type(e).__name__}")
-        logger.error(f"Error message: {str(e)}")
+        logger.error(f"Error message: {error_message}")
         logger.exception("Full traceback:")
         logger.error("="*60)
         
@@ -1789,8 +1829,8 @@ async def process_coaster_job(
         if job:
             job.status = "failed"
             job.progress = 0
-            job.message = f"Error: {str(e)}"
-            job.error = str(e)
+            job.message = f"Error: {error_message}"
+            job.error = error_message
             JobStore.save_job(job)
 
 def run_3d_processing_pipeline(flattened_image: bytes, params: ProcessRequest, job_id: str):
@@ -1954,10 +1994,14 @@ async def process_vectorization_3d(job_id: str):
         logger.info("="*60)
         
     except Exception as e:
+        error_message = str(e)
+        if is_quota_related_error(error_message):
+            error_message = with_support_contact(error_message)
+
         logger.error("="*60)
         logger.error(f"JOB {job_id} FAILED in Phase 2!")
         logger.error(f"Error type: {type(e).__name__}")
-        logger.error(f"Error message: {str(e)}")
+        logger.error(f"Error message: {error_message}")
         logger.exception("Full traceback:")
         logger.error("="*60)
         
@@ -1965,8 +2009,8 @@ async def process_vectorization_3d(job_id: str):
         if job:
             job.status = "failed"
             job.progress = 0
-            job.message = f"Error: {str(e)}"
-            job.error = str(e)
+            job.message = f"Error: {error_message}"
+            job.error = error_message
             JobStore.save_job(job)
 
 
@@ -2024,11 +2068,12 @@ async def process_image(
         
         if not allowed:
             logger.warning(f"Rate limit hit for fingerprint: {fingerprint[:16]}...")
+            rate_limit_message = with_support_contact(message or "Rate limit exceeded")
             raise HTTPException(
                 status_code=429,
                 detail={
                     "error": "rate_limited",
-                    "message": message,
+                    "message": rate_limit_message,
                     "retry_after": retry_after,
                     "bypass_available": ALLOW_BYPASS_WITH_API_KEY
                 }
@@ -2071,11 +2116,13 @@ async def process_image(
             client_ip,
         )
         if not quota_allowed:
+            quota_message = usage_info.get("message") or quota_message
+            quota_message = with_support_contact(quota_message)
             raise HTTPException(
                 status_code=429,
                 detail={
                     "error": "quota_exceeded",
-                    "message": usage_info.get("message") or quota_message,
+                    "message": quota_message,
                     "next_action": usage_info.get("next_action"),
                     "usage": usage_info,
                 },
@@ -2324,11 +2371,13 @@ async def retry_job(
         client_ip,
     )
     if not quota_allowed:
+        retry_quota_message = usage_info.get("message") or quota_message
+        retry_quota_message = with_support_contact(retry_quota_message)
         raise HTTPException(
             status_code=429,
             detail={
                 "error": "quota_exceeded",
-                "message": usage_info.get("message") or quota_message,
+                "message": retry_quota_message,
                 "next_action": usage_info.get("next_action"),
                 "usage": usage_info,
             },
