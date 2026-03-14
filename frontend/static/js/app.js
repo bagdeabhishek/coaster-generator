@@ -39,6 +39,10 @@ function getDeviceFingerprint() {
 // Global state
 let pollingInterval = null;
 let currentJobId = null;
+let pollingFailureCount = 0;
+let nextPollDelayMs = 1000;
+const MAX_POLL_FAILURES = 8;
+const MAX_POLL_DELAY_MS = 10000;
 let scene = null;
 let camera = null;
 let renderer = null;
@@ -512,17 +516,24 @@ function resetForm() {
 // Job Polling
 // ============================================
 
-function startPolling(jobId) {
-    // Clear existing interval
+function stopPolling() {
     if (pollingInterval) {
-        clearInterval(pollingInterval);
+        clearTimeout(pollingInterval);
+        pollingInterval = null;
     }
-    
+}
+
+function scheduleNextPoll(jobId) {
+    stopPolling();
+    pollingInterval = setTimeout(() => pollStatus(jobId), nextPollDelayMs);
+}
+
+function startPolling(jobId) {
+    stopPolling();
+    pollingFailureCount = 0;
+    nextPollDelayMs = 1000;
     // Poll immediately
     pollStatus(jobId);
-    
-    // Then poll every second
-    pollingInterval = setInterval(() => pollStatus(jobId), 1000);
 }
 
 async function pollStatus(jobId) {
@@ -530,29 +541,50 @@ async function pollStatus(jobId) {
         const response = await fetch(`/api/status/${jobId}`);
         
         if (!response.ok) {
-            throw new Error('Failed to get status');
+            let detail = '';
+            try {
+                const body = await response.json();
+                detail = body?.detail?.message || body?.detail || body?.message || '';
+            } catch (_) {
+                // ignore parse errors and use generic message
+            }
+            throw new Error(detail || `Failed to get status (${response.status})`);
         }
         
         const data = await response.json();
+        pollingFailureCount = 0;
+        nextPollDelayMs = 1000;
         
         // Update progress
         updateProgress(data.progress, data.message);
         
         // Handle different statuses
         if (data.status === 'review') {
-            clearInterval(pollingInterval);
+            stopPolling();
             showReviewSection(jobId);
         } else if (data.status === 'completed') {
-            clearInterval(pollingInterval);
+            stopPolling();
             show3DViewer(data.download_urls);
             resetForm();
         } else if (data.status === 'failed') {
-            clearInterval(pollingInterval);
+            stopPolling();
             showError(data.error || 'Processing failed');
+        } else {
+            scheduleNextPoll(jobId);
         }
         
     } catch (error) {
         console.error('Polling error:', error);
+        pollingFailureCount += 1;
+        nextPollDelayMs = Math.min(MAX_POLL_DELAY_MS, nextPollDelayMs * 2);
+
+        if (pollingFailureCount >= MAX_POLL_FAILURES) {
+            stopPolling();
+            showError('Lost connection while checking job status. Please retry in a moment.');
+            return;
+        }
+
+        scheduleNextPoll(jobId);
     }
 }
 
