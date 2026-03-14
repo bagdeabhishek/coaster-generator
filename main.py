@@ -2053,6 +2053,100 @@ async def process_vectorization_3d(job_id: str):
             JobStore.save_job(job)
 
 
+def _resolve_identity_context(request: Request):
+    """Resolve identity and network context used for quota and ownership checks."""
+    user_id, device_fingerprint, anon_quota_id, client_ip = _resolve_identity_context(request)
+    return user_id, device_fingerprint, anon_quota_id, client_ip
+
+
+def _build_process_params(
+    diameter: float,
+    thickness: float,
+    logo_depth: float,
+    scale: float,
+    flip_horizontal: bool,
+    top_rotate: int,
+    bottom_rotate: int,
+    nozzle_diameter: float,
+    auto_thicken: bool,
+) -> ProcessRequest:
+    """Create normalized ProcessRequest model from endpoint inputs."""
+    return ProcessRequest(
+        diameter=diameter,
+        thickness=thickness,
+        logo_depth=logo_depth,
+        scale=scale,
+        flip_horizontal=flip_horizontal,
+        top_rotate=top_rotate,
+        bottom_rotate=bottom_rotate,
+        nozzle_diameter=nozzle_diameter,
+        auto_thicken=auto_thicken,
+    )
+
+
+async def _consume_quota_or_raise(
+    job_id: str,
+    user_id: Optional[str],
+    device_fingerprint: Optional[str],
+    anon_quota_id: Optional[str],
+    client_ip: str,
+    bypass_limit: bool,
+) -> Dict[str, Any]:
+    """Run product quota checks and consume quota for a job unless bypassing."""
+    if bypass_limit:
+        logger.info("Bypassing quota consumption because user provided their own BFL API key")
+        return {}
+
+    usage_info: Dict[str, Any] = {}
+    quota_allowed, quota_message, _, usage_info = await check_quota(
+        anon_quota_id or device_fingerprint,
+        user_id,
+        client_ip,
+    )
+    if not quota_allowed:
+        quota_message = usage_info.get("message") or quota_message
+        quota_message = with_support_contact(quota_message)
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "quota_exceeded",
+                "message": quota_message,
+                "next_action": usage_info.get("next_action"),
+                "usage": usage_info,
+            },
+        )
+
+    quota_bucket = usage_info.get("bucket")
+    if not quota_bucket:
+        raise HTTPException(status_code=500, detail="Quota decision failed")
+
+    quota_event_id = await consume_quota(job_id, anon_quota_id or device_fingerprint, user_id, quota_bucket)
+    if not quota_event_id:
+        raise HTTPException(status_code=500, detail="Unable to reserve quota at this time")
+
+    return usage_info
+
+
+def _resolve_effective_api_key(api_key: str) -> str:
+    """Resolve user-provided key or server fallback key."""
+    effective_api_key = api_key if api_key else os.environ.get("BFL_API_KEY")
+    if not effective_api_key:
+        raise HTTPException(status_code=500, detail="No API key configured")
+    return effective_api_key
+
+
+def _queue_phase1_job(
+    background_tasks: BackgroundTasks,
+    job_id: str,
+    image_bytes: bytes,
+    params: ProcessRequest,
+    stamp_text: str,
+    effective_api_key: str,
+) -> None:
+    """Queue phase-1 processing task."""
+    background_tasks.add_task(process_coaster_job, job_id, image_bytes, params, stamp_text, effective_api_key)
+
+
 @app.post("/api/process")
 async def process_image(
     request: Request,
@@ -2091,10 +2185,7 @@ async def process_image(
     logger.info(f"Stamp text validated: {stamp_text}")
 
     # Resolve identity context
-    user_id = request.session.get("user_id")
-    device_fingerprint = request.headers.get("X-Device-Fingerprint")
-    anon_quota_id = None if user_id else f"session:{get_or_create_anon_session_id(request)}"
-    client_ip = get_client_ip(request)
+    user_id, device_fingerprint, anon_quota_id, client_ip = _resolve_identity_context(request)
 
     # Check if bypassing with own API key
     bypass_limit = bool(api_key) and ALLOW_BYPASS_WITH_API_KEY
@@ -2145,31 +2236,6 @@ async def process_image(
         logger.error("Empty image file received")
         raise HTTPException(status_code=400, detail="Empty image file")
 
-    # Check if bypassing with own API key
-    bypass_limit = bool(api_key) and ALLOW_BYPASS_WITH_API_KEY
-    using_own_key = bool(api_key)
-
-    # Quota checks (authoritative product limits)
-    usage_info = {}
-    if not bypass_limit:
-        quota_allowed, quota_message, _, usage_info = await check_quota(
-            anon_quota_id or device_fingerprint,
-            user_id,
-            client_ip,
-        )
-        if not quota_allowed:
-            quota_message = usage_info.get("message") or quota_message
-            quota_message = with_support_contact(quota_message)
-            raise HTTPException(
-                status_code=429,
-                detail={
-                    "error": "quota_exceeded",
-                    "message": quota_message,
-                    "next_action": usage_info.get("next_action"),
-                    "usage": usage_info,
-                },
-            )
-
     # Create job (don't store API key in job for security)
     job_id = str(uuid.uuid4())
     job = Job(
@@ -2185,24 +2251,20 @@ async def process_image(
     JobStore.save_job(job)
     logger.info(f"✓ Job created: {job_id} with stamp: {stamp_text}")
 
-    # Consume quota after job creation
-    if not bypass_limit:
-        quota_bucket = usage_info.get("bucket")
-        if not quota_bucket:
-            raise HTTPException(status_code=500, detail="Quota decision failed")
-        quota_event_id = await consume_quota(job_id, anon_quota_id or device_fingerprint, user_id, quota_bucket)
-        if not quota_event_id:
-            raise HTTPException(status_code=500, detail="Unable to reserve quota at this time")
-    else:
-        logger.info("Bypassing quota consumption because user provided their own BFL API key")
+    # Quota checks + consumption (authoritative product limits)
+    await _consume_quota_or_raise(
+        job_id=job_id,
+        user_id=user_id,
+        device_fingerprint=device_fingerprint,
+        anon_quota_id=anon_quota_id,
+        client_ip=client_ip,
+        bypass_limit=bypass_limit,
+    )
 
-    # Use provided API key or env var
-    effective_api_key = api_key if api_key else os.environ.get("BFL_API_KEY")
-    if not effective_api_key:
-        raise HTTPException(status_code=500, detail="No API key configured")
+    effective_api_key = _resolve_effective_api_key(api_key)
 
     # Create parameters object
-    params = ProcessRequest(
+    params = _build_process_params(
         diameter=diameter,
         thickness=thickness,
         logo_depth=logo_depth,
@@ -2217,7 +2279,7 @@ async def process_image(
 
     # Start background processing (pass API key separately, not stored)
     logger.info("Starting background processing task...")
-    background_tasks.add_task(process_coaster_job, job_id, image_bytes, params, stamp_text, effective_api_key)
+    _queue_phase1_job(background_tasks, job_id, image_bytes, params, stamp_text, effective_api_key)
     logger.info(f"✓✓✓ Job {job_id} queued successfully")
     logger.info("="*60)
     
@@ -2427,33 +2489,14 @@ async def regenerate_job(
     client_ip = get_client_ip(request)
 
     bypass_limit = bool(api_key) and ALLOW_BYPASS_WITH_API_KEY
-    usage_info = {}
-    if not bypass_limit:
-        quota_allowed, quota_message, _, usage_info = await check_quota(
-            anon_quota_id or device_fingerprint,
-            user_id,
-            client_ip,
-        )
-        if not quota_allowed:
-            regen_quota_message = usage_info.get("message") or quota_message
-            regen_quota_message = with_support_contact(regen_quota_message)
-            raise HTTPException(
-                status_code=429,
-                detail={
-                    "error": "quota_exceeded",
-                    "message": regen_quota_message,
-                    "next_action": usage_info.get("next_action"),
-                    "usage": usage_info,
-                },
-            )
-
-        quota_bucket = usage_info.get("bucket")
-        if not quota_bucket:
-            raise HTTPException(status_code=500, detail="Quota decision failed")
-
-        quota_event_id = await consume_quota(job_id, anon_quota_id or device_fingerprint, user_id, quota_bucket)
-        if not quota_event_id:
-            raise HTTPException(status_code=500, detail="Unable to reserve quota at this time")
+    await _consume_quota_or_raise(
+        job_id=job_id,
+        user_id=user_id,
+        device_fingerprint=device_fingerprint,
+        anon_quota_id=anon_quota_id,
+        client_ip=client_ip,
+        bypass_limit=bypass_limit,
+    )
 
     # Reset Phase-1 status while preserving params, owner, source image and stamp.
     job.status = "pending"
@@ -2464,11 +2507,8 @@ async def regenerate_job(
     job.uses_own_api_key = bool(api_key) if api_key else job.uses_own_api_key
     JobStore.save_job(job)
 
-    effective_api_key = api_key if api_key else os.environ.get("BFL_API_KEY")
-    if not effective_api_key:
-        raise HTTPException(status_code=500, detail="No API key configured")
-
-    background_tasks.add_task(process_coaster_job, job_id, image_bytes, job.params, job.stamp_text, effective_api_key)
+    effective_api_key = _resolve_effective_api_key(api_key)
+    _queue_phase1_job(background_tasks, job_id, image_bytes, job.params, job.stamp_text, effective_api_key)
 
     return {"job_id": job_id, "status": "processing", "message": "Regenerating image..."}
 
@@ -2508,34 +2548,7 @@ async def retry_job(
     if len(image_bytes) == 0:
         raise HTTPException(status_code=400, detail="Empty image file")
 
-    user_id = request.session.get("user_id")
-    device_fingerprint = request.headers.get("X-Device-Fingerprint")
-    anon_quota_id = None if user_id else f"session:{get_or_create_anon_session_id(request)}"
-    client_ip = get_client_ip(request)
-
-    # In retry, we might not have the API key in the form, but if the original used one, we should ideally bypass.
-    # However, retry currently doesn't accept the api_key form field.
-    # For now, we'll enforce quota on retries unless they had their own API key (which we aren't tracking natively in job, unfortunately, for security).
-    # Since we don't store the API key, retries always use the server quota or fail if server quota is out.
-    
-    usage_info = {}
-    quota_allowed, quota_message, _, usage_info = await check_quota(
-        anon_quota_id or device_fingerprint,
-        user_id,
-        client_ip,
-    )
-    if not quota_allowed:
-        retry_quota_message = usage_info.get("message") or quota_message
-        retry_quota_message = with_support_contact(retry_quota_message)
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "error": "quota_exceeded",
-                "message": retry_quota_message,
-                "next_action": usage_info.get("next_action"),
-                "usage": usage_info,
-            },
-        )
+    user_id, device_fingerprint, anon_quota_id, client_ip = _resolve_identity_context(request)
     
     # Reset job state
     job.status = "pending"
@@ -2547,15 +2560,17 @@ async def retry_job(
     job.error = None
     JobStore.save_job(job)
 
-    quota_bucket = usage_info.get("bucket")
-    if not quota_bucket:
-        raise HTTPException(status_code=500, detail="Quota decision failed")
-    quota_event_id = await consume_quota(job_id, anon_quota_id or device_fingerprint, user_id, quota_bucket)
-    if not quota_event_id:
-        raise HTTPException(status_code=500, detail="Unable to reserve quota at this time")
+    await _consume_quota_or_raise(
+        job_id=job_id,
+        user_id=user_id,
+        device_fingerprint=device_fingerprint,
+        anon_quota_id=anon_quota_id,
+        client_ip=client_ip,
+        bypass_limit=False,
+    )
     
     # Create parameters object
-    params = ProcessRequest(
+    params = _build_process_params(
         diameter=diameter,
         thickness=thickness,
         logo_depth=logo_depth,
@@ -2568,12 +2583,9 @@ async def retry_job(
     )
     
     # Start background processing with required args
-    effective_api_key = os.environ.get("BFL_API_KEY")
-    if not effective_api_key:
-        raise HTTPException(status_code=500, detail="No API key configured")
-
+    effective_api_key = _resolve_effective_api_key("")
     stamp_text = job.stamp_text or "Abhishek Does Stuff"
-    background_tasks.add_task(process_coaster_job, job_id, image_bytes, params, stamp_text, effective_api_key)
+    _queue_phase1_job(background_tasks, job_id, image_bytes, params, stamp_text, effective_api_key)
     
     return {"job_id": job_id, "status": "processing", "message": "Restarting with new image..."}
 
