@@ -636,6 +636,16 @@ elements.regenerateBtn.addEventListener('click', async function() {
     try {
         const formData = new FormData();
         formData.append('api_key', elements.apiKey.value || '');
+        formData.append('stamp_text', elements.stampText.value || 'Abhishek Does Stuff');
+        formData.append('diameter', elements.diameter.value);
+        formData.append('thickness', elements.thickness.value);
+        formData.append('logo_depth', elements.logoDepth.value);
+        formData.append('scale', elements.scale.value);
+        formData.append('nozzle_diameter', elements.nozzleDiameter.value || '0.4');
+        formData.append('top_rotate', elements.topRotate.value);
+        formData.append('bottom_rotate', elements.bottomRotate.value);
+        formData.append('flip_horizontal', elements.flipHorizontal.checked);
+        formData.append('auto_thicken', elements.autoThicken.checked);
 
         const response = await fetch(`/api/regenerate/${currentJobId}`, {
             method: 'POST',
