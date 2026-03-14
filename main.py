@@ -280,17 +280,27 @@ class JobStore:
     
     @classmethod
     def save_job(cls, job: Job) -> None:
-        """Save job to disk with file locking."""
+        """Save job to disk atomically with file locking."""
         job_path = cls._get_job_path(job.job_id)
+        temp_path = f"{job_path}.tmp.{uuid.uuid4().hex}"
         try:
-            with open(job_path, 'w') as f:
+            with open(temp_path, 'w') as f:
                 # Acquire exclusive lock
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                 json.dump(job.to_dict(), f)
+                f.flush()
+                os.fsync(f.fileno())
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            os.replace(temp_path, job_path)
             logger.debug(f"Job {job.job_id} saved to disk")
         except Exception as e:
             logger.error(f"Failed to save job {job.job_id}: {e}")
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
     
     @classmethod
     def get_job(cls, job_id: str) -> Optional[Job]:
