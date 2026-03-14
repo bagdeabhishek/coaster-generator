@@ -9,6 +9,7 @@ import hashlib
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 import threading
+from contextlib import contextmanager
 
 # Database configuration
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -585,6 +586,28 @@ def is_webhook_processed(webhook_id: str) -> bool:
         query = _format_query("SELECT 1 FROM processed_webhooks WHERE webhook_id = ?")
         cursor.execute(query, (webhook_id,))
         return cursor.fetchone() is not None
+
+
+@contextmanager
+def webhook_processing_lock(webhook_id: str):
+    """Cross-worker lock for webhook processing, strongest on PostgreSQL."""
+    if not USE_POSTGRES:
+        with db_lock:
+            yield
+        return
+
+    conn = get_connection()
+    lock_id = _advisory_lock_id(f"webhook:{webhook_id}")
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT pg_advisory_lock(%s)", (lock_id,))
+        yield
+    finally:
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
+        finally:
+            release_connection(conn)
 
 
 def clear_all_quotas():

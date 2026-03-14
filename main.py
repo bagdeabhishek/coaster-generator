@@ -44,6 +44,7 @@ try:
         set_subscription,
         record_webhook,
         is_webhook_processed,
+        webhook_processing_lock,
         clear_all_quotas,
         USE_POSTGRES
     )
@@ -62,6 +63,8 @@ except ImportError:
         is_webhook_processed,
         clear_all_quotas,
     )
+    from contextlib import nullcontext
+    webhook_processing_lock = lambda _webhook_id: nullcontext()
     USE_POSTGRES = False
     print("Using legacy SQLite database")
 from quota_service import check_quota, check_and_consume_quota_atomic
@@ -899,9 +902,6 @@ async def handle_webhook(request: Request):
     if not webhook_id:
         raise HTTPException(status_code=400, detail="Missing webhook-id")
 
-    if is_webhook_processed(webhook_id):
-        return {"received": True}
-
     raw_body = await request.body()
 
     try:
@@ -925,30 +925,34 @@ async def handle_webhook(request: Request):
     data = payload.get("data") or {}
     subscription = data.get("subscription") or (data if data.get("payload_type") == "Subscription" else {})
 
-    if event_type.startswith("subscription.") or subscription:
-        metadata = subscription.get("metadata") or {}
-        customer = subscription.get("customer") or {}
-        email = (customer.get("email") or subscription.get("customer_email") or "").strip().lower()
+    with webhook_processing_lock(webhook_id):
+        if is_webhook_processed(webhook_id):
+            return {"received": True}
 
-        user_id = metadata.get("user_id")
-        if not user_id and email:
-            user = get_user_by_email(email)
-            user_id = user["id"] if user else None
+        if event_type.startswith("subscription.") or subscription:
+            metadata = subscription.get("metadata") or {}
+            customer = subscription.get("customer") or {}
+            email = (customer.get("email") or subscription.get("customer_email") or "").strip().lower()
 
-        if user_id:
-            status = (subscription.get("status") or event_type.replace("subscription.", "") or "unknown").lower()
-            set_subscription(
-                user_id=user_id,
-                provider="dodo",
-                customer_id=customer.get("id") or subscription.get("customer_id"),
-                subscription_id=subscription.get("id") or subscription.get("subscription_id"),
-                status=status,
-                period_start=subscription.get("period_start") or subscription.get("current_period_start"),
-                period_end=subscription.get("period_end") or subscription.get("current_period_end"),
-                plan_code=subscription.get("plan_code") or subscription.get("product_id"),
-            )
+            user_id = metadata.get("user_id")
+            if not user_id and email:
+                user = get_user_by_email(email)
+                user_id = user["id"] if user else None
 
-    record_webhook(webhook_id, event_type)
+            if user_id:
+                status = (subscription.get("status") or event_type.replace("subscription.", "") or "unknown").lower()
+                set_subscription(
+                    user_id=user_id,
+                    provider="dodo",
+                    customer_id=customer.get("id") or subscription.get("customer_id"),
+                    subscription_id=subscription.get("id") or subscription.get("subscription_id"),
+                    status=status,
+                    period_start=subscription.get("period_start") or subscription.get("current_period_start"),
+                    period_end=subscription.get("period_end") or subscription.get("current_period_end"),
+                    plan_code=subscription.get("plan_code") or subscription.get("product_id"),
+                )
+
+        record_webhook(webhook_id, event_type)
     return {"received": True}
 
 
