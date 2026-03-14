@@ -2239,20 +2239,7 @@ async def process_image(
         logger.error("Empty image file received")
         raise HTTPException(status_code=400, detail="Empty image file")
 
-    # Create job (don't store API key in job for security)
     job_id = str(uuid.uuid4())
-    job = Job(
-        job_id=job_id,
-        stamp_text=stamp_text,
-        uses_own_api_key=using_own_key,
-        owner_user_id=user_id,
-        owner_anon_id=None if user_id else get_or_create_anon_session_id(request),
-    )
-
-    source_path = JobStore.save_source_image(job_id, image_bytes)
-    job.source_image_path = source_path
-    JobStore.save_job(job)
-    logger.info(f"✓ Job created: {job_id} with stamp: {stamp_text}")
 
     # Quota checks + consumption (authoritative product limits)
     await _consume_quota_or_raise(
@@ -2265,6 +2252,20 @@ async def process_image(
     )
 
     effective_api_key = _resolve_effective_api_key(api_key)
+
+    # Create job only after quota and key checks pass.
+    job = Job(
+        job_id=job_id,
+        stamp_text=stamp_text,
+        uses_own_api_key=using_own_key,
+        owner_user_id=user_id,
+        owner_anon_id=None if user_id else get_or_create_anon_session_id(request),
+    )
+
+    source_path = JobStore.save_source_image(job_id, image_bytes)
+    job.source_image_path = source_path
+    JobStore.save_job(job)
+    logger.info(f"✓ Job created: {job_id} with stamp: {stamp_text}")
 
     # Create parameters object
     params = _build_process_params(
@@ -2553,16 +2554,6 @@ async def retry_job(
 
     user_id, device_fingerprint, anon_quota_id, client_ip = _resolve_identity_context(request)
     
-    # Reset job state
-    job.status = "pending"
-    job.progress = 0
-    job.message = "Restarting with new image..."
-    job.preview_image_path = None
-    source_path = JobStore.save_source_image(job_id, image_bytes)
-    job.source_image_path = source_path
-    job.error = None
-    JobStore.save_job(job)
-
     await _consume_quota_or_raise(
         job_id=job_id,
         user_id=user_id,
@@ -2585,8 +2576,19 @@ async def retry_job(
         auto_thicken=auto_thicken,
     )
     
-    # Start background processing with required args
     effective_api_key = _resolve_effective_api_key("")
+
+    # Persist updated state only after quota/key checks pass.
+    job.status = "pending"
+    job.progress = 0
+    job.message = "Restarting with new image..."
+    job.preview_image_path = None
+    source_path = JobStore.save_source_image(job_id, image_bytes)
+    job.source_image_path = source_path
+    job.error = None
+    JobStore.save_job(job)
+
+    # Start background processing with required args
     stamp_text = job.stamp_text or "Abhishek Does Stuff"
     _queue_phase1_job(background_tasks, job_id, image_bytes, params, stamp_text, effective_api_key)
     
