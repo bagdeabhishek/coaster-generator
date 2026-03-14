@@ -335,6 +335,79 @@ def record_usage_event(
         return event_id
 
 
+def _advisory_lock_id(lock_key: str) -> int:
+    """Build a stable 63-bit advisory lock id from an arbitrary string."""
+    digest = hashlib.sha256(lock_key.encode()).hexdigest()
+    return int(digest[:15], 16)
+
+
+def reserve_usage_event_atomic(
+    job_id: str,
+    principal_type: str,
+    principal_id: str,
+    bucket: str,
+    limit: int,
+    since: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Atomically reserve one usage event if under limit.
+
+    Returns event_id when reserved, or None if quota is exhausted.
+    """
+    if limit <= 0:
+        return None
+
+    event_id = uuid.uuid4().hex
+    now = datetime.utcnow().isoformat()
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+
+        if USE_POSTGRES:
+            lock_key = f"quota:{principal_type}:{principal_id}:{bucket}:{since or 'all'}"
+            cursor.execute("SELECT pg_advisory_xact_lock(%s)", (_advisory_lock_id(lock_key),))
+        else:
+            cursor.execute("BEGIN IMMEDIATE")
+
+        if since:
+            count_query = _format_query(
+                """
+                SELECT COUNT(*) as count FROM usage_events
+                WHERE principal_type = ? AND principal_id = ? AND bucket = ? AND created_at >= ?
+                """
+            )
+            cursor.execute(count_query, (principal_type, principal_id, bucket, since))
+        else:
+            count_query = _format_query(
+                """
+                SELECT COUNT(*) as count FROM usage_events
+                WHERE principal_type = ? AND principal_id = ? AND bucket = ?
+                """
+            )
+            cursor.execute(count_query, (principal_type, principal_id, bucket))
+
+        row = cursor.fetchone()
+        used = row["count"] if row else 0
+        if used >= limit:
+            conn.rollback()
+            return None
+
+        insert_query = _format_query(
+            """
+            INSERT INTO usage_events (id, job_id, principal_type, principal_id, bucket, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """
+        )
+        cursor.execute(insert_query, (event_id, job_id, principal_type, principal_id, bucket, now))
+        conn.commit()
+        return event_id
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        release_connection(conn)
+
+
 def count_usage_in_bucket(
     principal_type: str,
     principal_id: str,

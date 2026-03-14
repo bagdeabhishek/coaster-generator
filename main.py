@@ -64,7 +64,7 @@ except ImportError:
     )
     USE_POSTGRES = False
     print("Using legacy SQLite database")
-from quota_service import check_quota, consume_quota, PAID_MONTHLY_LIMIT
+from quota_service import check_quota, check_and_consume_quota_atomic
 
 # Security imports
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -1630,10 +1630,11 @@ async def _consume_quota_or_raise(
         return {}
 
     usage_info: Dict[str, Any] = {}
-    quota_allowed, quota_message, _, usage_info = await check_quota(
-        anon_quota_id or device_fingerprint,
-        user_id,
-        client_ip,
+    quota_allowed, quota_message, _, usage_info, quota_event_id = await check_and_consume_quota_atomic(
+        job_id=job_id,
+        fingerprint=anon_quota_id or device_fingerprint,
+        user_id=user_id,
+        ip_header=client_ip,
     )
     if not quota_allowed:
         quota_message = usage_info.get("message") or quota_message
@@ -1648,11 +1649,6 @@ async def _consume_quota_or_raise(
             },
         )
 
-    quota_bucket = usage_info.get("bucket")
-    if not quota_bucket:
-        raise HTTPException(status_code=500, detail="Quota decision failed")
-
-    quota_event_id = await consume_quota(job_id, anon_quota_id or device_fingerprint, user_id, quota_bucket)
     if not quota_event_id:
         raise HTTPException(status_code=500, detail="Unable to reserve quota at this time")
 
