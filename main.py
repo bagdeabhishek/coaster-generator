@@ -2374,6 +2374,16 @@ async def regenerate_job(
     request: Request,
     background_tasks: BackgroundTasks,
     api_key: str = Form(""),
+    stamp_text: Optional[str] = Form(None),
+    diameter: Optional[float] = Form(None),
+    thickness: Optional[float] = Form(None),
+    logo_depth: Optional[float] = Form(None),
+    scale: Optional[float] = Form(None),
+    flip_horizontal: Optional[bool] = Form(None),
+    top_rotate: Optional[int] = Form(None),
+    bottom_rotate: Optional[int] = Form(None),
+    nozzle_diameter: Optional[float] = Form(None),
+    auto_thicken: Optional[bool] = Form(None),
 ):
     """Regenerate preview image from original source image without re-upload."""
     job = JobStore.get_job(job_id)
@@ -2388,7 +2398,26 @@ async def regenerate_job(
     if not job.params:
         raise HTTPException(status_code=400, detail="Job parameters missing")
 
+    # Allow users to tweak prompt text/settings before regeneration.
+    effective_stamp_text = validate_stamp_text(stamp_text if stamp_text is not None else (job.stamp_text or "Abhishek Does Stuff"))
+    current_params = job.params
+    job.params = ProcessRequest(
+        diameter=diameter if diameter is not None else current_params.diameter,
+        thickness=thickness if thickness is not None else current_params.thickness,
+        logo_depth=logo_depth if logo_depth is not None else current_params.logo_depth,
+        scale=scale if scale is not None else current_params.scale,
+        flip_horizontal=flip_horizontal if flip_horizontal is not None else current_params.flip_horizontal,
+        top_rotate=top_rotate if top_rotate is not None else current_params.top_rotate,
+        bottom_rotate=bottom_rotate if bottom_rotate is not None else current_params.bottom_rotate,
+        nozzle_diameter=nozzle_diameter if nozzle_diameter is not None else current_params.nozzle_diameter,
+        auto_thicken=auto_thicken if auto_thicken is not None else current_params.auto_thicken,
+    )
+    job.stamp_text = effective_stamp_text
+
     image_bytes = JobStore.get_source_image(job_id)
+    if not image_bytes:
+        # Backward compatibility: older jobs may not have source image stored.
+        image_bytes = JobStore.get_preview_image(job_id)
     if not image_bytes:
         raise HTTPException(status_code=400, detail="Original image not available for regeneration")
 
@@ -2396,9 +2425,6 @@ async def regenerate_job(
     device_fingerprint = request.headers.get("X-Device-Fingerprint")
     anon_quota_id = None if user_id else f"session:{get_or_create_anon_session_id(request)}"
     client_ip = get_client_ip(request)
-
-    if job.uses_own_api_key and not api_key:
-        raise HTTPException(status_code=400, detail="Provide your BFL API key to regenerate this image")
 
     bypass_limit = bool(api_key) and ALLOW_BYPASS_WITH_API_KEY
     usage_info = {}
@@ -2442,8 +2468,7 @@ async def regenerate_job(
     if not effective_api_key:
         raise HTTPException(status_code=500, detail="No API key configured")
 
-    stamp_text = job.stamp_text or "Abhishek Does Stuff"
-    background_tasks.add_task(process_coaster_job, job_id, image_bytes, job.params, stamp_text, effective_api_key)
+    background_tasks.add_task(process_coaster_job, job_id, image_bytes, job.params, job.stamp_text, effective_api_key)
 
     return {"job_id": job_id, "status": "processing", "message": "Regenerating image..."}
 
