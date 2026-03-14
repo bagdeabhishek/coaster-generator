@@ -2055,7 +2055,10 @@ async def process_vectorization_3d(job_id: str):
 
 def _resolve_identity_context(request: Request):
     """Resolve identity and network context used for quota and ownership checks."""
-    user_id, device_fingerprint, anon_quota_id, client_ip = _resolve_identity_context(request)
+    user_id = request.session.get("user_id")
+    device_fingerprint = request.headers.get("X-Device-Fingerprint")
+    anon_quota_id = None if user_id else f"session:{get_or_create_anon_session_id(request)}"
+    client_ip = get_client_ip(request)
     return user_id, device_fingerprint, anon_quota_id, client_ip
 
 
