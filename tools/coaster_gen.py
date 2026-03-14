@@ -11,11 +11,13 @@ import os
 import uuid
 import zipfile
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Tuple, List
 
 import numpy as np
 import trimesh
 import vtracer
+from shapely import affinity
+from shapely.geometry import Polygon, MultiPolygon
 from shapely.ops import unary_union
 
 
@@ -28,6 +30,8 @@ class CoasterParams:
     flip_horizontal: bool = True
     top_rotate: int = 0
     bottom_rotate: int = 0
+    nozzle_diameter: float = 0.4
+    auto_thicken: bool = True
 
 
 class CoasterGenerator:
@@ -40,6 +44,8 @@ class CoasterGenerator:
         flip_horizontal: bool = True,
         top_rotate: int = 0,
         bottom_rotate: int = 0,
+        nozzle_diameter: float = 0.4,
+        auto_thicken: bool = True,
     ) -> None:
         self.params = CoasterParams(
             diameter=diameter,
@@ -49,7 +55,148 @@ class CoasterGenerator:
             flip_horizontal=flip_horizontal,
             top_rotate=top_rotate,
             bottom_rotate=bottom_rotate,
+            nozzle_diameter=nozzle_diameter,
+            auto_thicken=auto_thicken,
         )
+
+    @staticmethod
+    def _explode_polygons(geom) -> List[Polygon]:
+        """Normalize geometry into a flat list of polygons."""
+        if geom is None or geom.is_empty:
+            return []
+        if isinstance(geom, Polygon):
+            return [geom]
+        if isinstance(geom, MultiPolygon):
+            return [p for p in geom.geoms if not p.is_empty]
+        return []
+
+    @staticmethod
+    def _safe_polygon(poly: Polygon):
+        """Attempt to repair invalid polygon and return geometry."""
+        try:
+            return poly.buffer(0)
+        except Exception:
+            return poly
+
+    @staticmethod
+    def _minimum_clearance(poly: Polygon) -> float:
+        """Best-effort minimum-clearance metric for thin-feature detection."""
+        try:
+            val = float(poly.minimum_clearance)
+            if np.isfinite(val):
+                return max(0.0, val)
+        except Exception:
+            pass
+        return 0.0
+
+    @staticmethod
+    def _filter_small_holes(poly: Polygon, min_hole_area: float) -> Polygon:
+        """Remove holes below threshold area from a polygon."""
+        kept_holes = []
+        for ring in poly.interiors:
+            hole = Polygon(ring)
+            if abs(hole.area) >= min_hole_area:
+                kept_holes.append(ring.coords)
+        return Polygon(poly.exterior.coords, holes=kept_holes)
+
+    def _printability_thresholds(self, scale_factor: float):
+        """Return threshold values in both mm and source SVG units."""
+        n = max(0.2, float(self.params.nozzle_diameter))
+
+        # Conservative, printability-only thresholds.
+        min_feature_mm = max(n * 1.6, 0.5)
+        min_island_area_mm2 = max((n * 1.25) ** 2, 0.25)
+        min_hole_area_mm2 = max((n * 1.0) ** 2, 0.2)
+        max_thicken_mm = max(n * 0.6, 0.15)
+
+        safe_scale = max(scale_factor, 1e-9)
+        inv = 1.0 / safe_scale
+        inv2 = inv * inv
+
+        return {
+            "min_feature_mm": min_feature_mm,
+            "min_island_area_mm2": min_island_area_mm2,
+            "min_hole_area_mm2": min_hole_area_mm2,
+            "max_thicken_mm": max_thicken_mm,
+            "min_feature_raw": min_feature_mm * inv,
+            "min_island_area_raw": min_island_area_mm2 * inv2,
+            "min_hole_area_raw": min_hole_area_mm2 * inv2,
+            "max_thicken_raw": max_thicken_mm * inv,
+        }
+
+    def _needs_printability_fix(self, polygons: List[Polygon], t: dict) -> bool:
+        """Check whether printability preprocessing is needed at all."""
+        min_feature = t["min_feature_raw"]
+        min_island = t["min_island_area_raw"]
+        min_hole = t["min_hole_area_raw"]
+
+        for poly in polygons:
+            if abs(poly.area) < min_island:
+                return True
+
+            for ring in poly.interiors:
+                if abs(Polygon(ring).area) < min_hole:
+                    return True
+
+            mc = self._minimum_clearance(poly)
+            if mc > 0 and mc < min_feature:
+                return True
+
+        return False
+
+    def _preprocess_polygons_for_printability(
+        self,
+        polygons: List[Polygon],
+        scale_factor: float,
+    ) -> List[Polygon]:
+        """
+        Minimal printability-only preprocessing in SVG space.
+
+        Principle: no-op for already-printable geometry; targeted fixes only.
+        """
+        if not polygons:
+            return polygons
+
+        t = self._printability_thresholds(scale_factor)
+        if not self._needs_printability_fix(polygons, t):
+            return polygons
+
+        min_feature = t["min_feature_raw"]
+        min_island = t["min_island_area_raw"]
+        min_hole = t["min_hole_area_raw"]
+        max_thicken = t["max_thicken_raw"]
+
+        processed: List[Polygon] = []
+        for src_poly in polygons:
+            geom = self._safe_polygon(src_poly)
+            for poly in self._explode_polygons(geom):
+                if abs(poly.area) < min_island:
+                    continue
+
+                poly = self._filter_small_holes(poly, min_hole)
+                geom2 = self._safe_polygon(poly)
+
+                # Auto-thicken only when specifically enabled and needed.
+                if self.params.auto_thicken:
+                    for p in self._explode_polygons(geom2):
+                        mc = self._minimum_clearance(p)
+                        if mc > 0 and mc < min_feature:
+                            delta = min((min_feature - mc) * 0.5, max_thicken)
+                            if delta > 0:
+                                p = p.buffer(delta, join_style="mitre", cap_style="square")
+                            p = self._safe_polygon(p)
+                            for p2 in self._explode_polygons(p):
+                                if abs(p2.area) >= min_island:
+                                    processed.append(p2)
+                        else:
+                            if abs(p.area) >= min_island:
+                                processed.append(p)
+                else:
+                    for p in self._explode_polygons(geom2):
+                        if abs(p.area) >= min_island:
+                            processed.append(p)
+
+        return processed if processed else polygons
 
     def _vectorize_image(self, image_bytes: bytes, output_dir: str) -> str:
         temp_png_path = os.path.join(output_dir, f"temp_{uuid.uuid4().hex}.png")
@@ -165,10 +312,65 @@ class CoasterGenerator:
             else:
                 processed_polys.append(outer)
 
-        logo_meshes = []
+        if not processed_polys:
+            raise RuntimeError("No valid polygons after SVG cleanup")
+
+        # Compute current SVG size to derive mm conversion factor.
+        global_min_x = min(poly.bounds[0] for poly in processed_polys)
+        global_min_y = min(poly.bounds[1] for poly in processed_polys)
+        global_max_x = max(poly.bounds[2] for poly in processed_polys)
+        global_max_y = max(poly.bounds[3] for poly in processed_polys)
+        current_size_x = global_max_x - global_min_x
+        current_size_y = global_max_y - global_min_y
+        current_size = max(current_size_x, current_size_y)
+        if current_size <= 0:
+            raise RuntimeError("Invalid logo bounds: zero size")
+
+        target_size = p.diameter * p.scale
+        mirror_x = -1 if p.flip_horizontal else 1
+        scale_factor = target_size / current_size
+
+        # Minimal printability preprocessing in SVG domain (only if needed).
+        processed_polys = self._preprocess_polygons_for_printability(processed_polys, scale_factor)
+
+        # Recompute bounds after preprocessing and scale to target size.
+        global_min_x = min(poly.bounds[0] for poly in processed_polys)
+        global_min_y = min(poly.bounds[1] for poly in processed_polys)
+        global_max_x = max(poly.bounds[2] for poly in processed_polys)
+        global_max_y = max(poly.bounds[3] for poly in processed_polys)
+        current_size_x = global_max_x - global_min_x
+        current_size_y = global_max_y - global_min_y
+        current_size = max(current_size_x, current_size_y)
+        if current_size <= 0:
+            raise RuntimeError("Invalid logo bounds after preprocessing")
+
+        scale_factor = target_size / current_size
+
+        transformed_polys: List[Polygon] = []
         for poly in processed_polys:
+            s = affinity.scale(poly, xfact=mirror_x * scale_factor, yfact=scale_factor, origin=(0, 0))
+            transformed_polys.extend(self._explode_polygons(self._safe_polygon(s)))
+
+        if not transformed_polys:
+            raise RuntimeError("No valid polygons after scaling")
+
+        # Center the transformed logo around origin.
+        tx_min_x = min(poly.bounds[0] for poly in transformed_polys)
+        tx_min_y = min(poly.bounds[1] for poly in transformed_polys)
+        tx_max_x = max(poly.bounds[2] for poly in transformed_polys)
+        tx_max_y = max(poly.bounds[3] for poly in transformed_polys)
+        center_x = (tx_min_x + tx_max_x) / 2.0
+        center_y = (tx_min_y + tx_max_y) / 2.0
+
+        centered_polys: List[Polygon] = []
+        for poly in transformed_polys:
+            centered = affinity.translate(poly, xoff=-center_x, yoff=-center_y)
+            centered_polys.extend(self._explode_polygons(self._safe_polygon(centered)))
+
+        logo_meshes = []
+        for poly in centered_polys:
             try:
-                logo_meshes.append(trimesh.creation.extrude_polygon(poly.buffer(0), height=p.logo_depth))
+                logo_meshes.append(trimesh.creation.extrude_polygon(poly, height=p.logo_depth))
             except Exception:
                 continue
 
@@ -176,29 +378,6 @@ class CoasterGenerator:
             raise RuntimeError("No valid logo meshes could be created")
 
         logos_combined = trimesh.util.concatenate(logo_meshes)
-
-        bounds = logos_combined.bounds
-        current_size_x = bounds[1][0] - bounds[0][0]
-        current_size_y = bounds[1][1] - bounds[0][1]
-        current_size = max(current_size_x, current_size_y)
-        if current_size == 0:
-            raise RuntimeError("Invalid logo bounds: zero size")
-
-        target_size = p.diameter * p.scale
-        mirror_x = -1 if p.flip_horizontal else 1
-
-        matrix = np.eye(4)
-        matrix[0, 0] *= mirror_x * target_size / current_size
-        matrix[1, 1] *= target_size / current_size
-        logos_combined.apply_transform(matrix)
-
-        new_bounds = logos_combined.bounds
-        center_x = (new_bounds[0][0] + new_bounds[1][0]) / 2
-        center_y = (new_bounds[0][1] + new_bounds[1][1]) / 2
-        trans = np.eye(4)
-        trans[0, 3] = -center_x
-        trans[1, 3] = -center_y
-        logos_combined.apply_transform(trans)
 
         top_logo = logos_combined.copy()
         if p.top_rotate != 0:

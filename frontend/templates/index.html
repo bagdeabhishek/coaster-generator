@@ -225,12 +225,25 @@
                                             <input type="number" id="bottomRotate" name="bottom_rotate" value="0" min="0" max="360" step="1"
                                                 class="w-full px-4 py-2.5 rounded-md border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
                                         </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Nozzle Diameter (mm)</label>
+                                            <input type="number" id="nozzleDiameter" name="nozzle_diameter" value="0.4" min="0.2" max="1.0" step="0.05"
+                                                class="w-full px-4 py-2.5 rounded-md border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm">
+                                            <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Used for printability checks (thin feature handling)</p>
+                                        </div>
                                     </div>
                                     <div class="flex items-center pt-2">
                                         <input type="checkbox" id="flipHorizontal" name="flip_horizontal" checked 
                                             class="w-4 h-4 text-primary-600 border-zinc-300 rounded focus:ring-primary-500 dark:bg-zinc-700 dark:border-zinc-600">
                                         <label for="flipHorizontal" class="ml-2 text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
                                             Flip Horizontal (Mirror)
+                                        </label>
+                                    </div>
+                                    <div class="flex items-center pt-1">
+                                        <input type="checkbox" id="autoThicken" name="auto_thicken" checked
+                                            class="w-4 h-4 text-primary-600 border-zinc-300 rounded focus:ring-primary-500 dark:bg-zinc-700 dark:border-zinc-600">
+                                        <label for="autoThicken" class="ml-2 text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                                            Auto-thicken thin features (printability only)
                                         </label>
                                     </div>
                                 </div>
@@ -343,7 +356,13 @@
                             </div>
                             
                             <!-- 3D Canvas -->
-                            <div id="viewerContainer" class="w-full bg-zinc-900 dark:bg-black rounded-xl shadow-inner cursor-move border border-zinc-800" style="height: 400px; max-height: 400px; overflow: hidden;"></div>
+                            <div class="relative">
+                                <div id="viewerContainer" class="w-full bg-zinc-900 dark:bg-black rounded-xl shadow-inner cursor-move border border-zinc-800" style="height: 400px; max-height: 400px; overflow: hidden;"></div>
+                                <div id="viewerLoading" class="hidden absolute inset-0 bg-zinc-900/75 rounded-xl flex flex-col items-center justify-center gap-3 z-20">
+                                    <div class="w-8 h-8 border-2 border-primary-300 border-t-primary-500 rounded-full animate-spin"></div>
+                                    <p id="viewerLoadingText" class="text-sm text-zinc-100 font-medium">Loading 3D model...</p>
+                                </div>
+                            </div>
                             
                             <p class="text-center text-sm text-zinc-500 dark:text-zinc-400 mt-4">
                                 Click & drag to rotate • Scroll to zoom • Right-click to pan

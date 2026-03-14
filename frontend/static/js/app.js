@@ -62,9 +62,11 @@ const elements = {
     thickness: document.getElementById('thickness'),
     logoDepth: document.getElementById('logoDepth'),
     scale: document.getElementById('scale'),
+    nozzleDiameter: document.getElementById('nozzleDiameter'),
     topRotate: document.getElementById('topRotate'),
     bottomRotate: document.getElementById('bottomRotate'),
     flipHorizontal: document.getElementById('flipHorizontal'),
+    autoThicken: document.getElementById('autoThicken'),
     generateBtn: document.getElementById('generateBtn'),
     generateBtnText: document.getElementById('generateBtnText'),
     
@@ -93,6 +95,8 @@ const elements = {
     reviewImage: document.getElementById('reviewImage'),
     viewerSection: document.getElementById('viewerSection'),
     viewerContainer: document.getElementById('viewerContainer'),
+    viewerLoading: document.getElementById('viewerLoading'),
+    viewerLoadingText: document.getElementById('viewerLoadingText'),
     downloadsSection: document.getElementById('downloadsSection'),
     errorSection: document.getElementById('errorSection'),
     errorMessage: document.getElementById('errorMessage'),
@@ -417,9 +421,11 @@ async function handleSubmit() {
     formData.append('thickness', elements.thickness.value);
     formData.append('logo_depth', elements.logoDepth.value);
     formData.append('scale', elements.scale.value);
+    formData.append('nozzle_diameter', elements.nozzleDiameter.value || '0.4');
     formData.append('top_rotate', elements.topRotate.value);
     formData.append('bottom_rotate', elements.bottomRotate.value);
     formData.append('flip_horizontal', elements.flipHorizontal.checked);
+    formData.append('auto_thicken', elements.autoThicken.checked);
     
     // Show loading state
     elements.generateBtn.disabled = true;
@@ -487,6 +493,7 @@ function resetUI() {
     if (scene) {
         clearMeshes();
     }
+    setViewerLoading(false);
 }
 
 function resetForm() {
@@ -626,6 +633,15 @@ elements.retrySubmitBtn.addEventListener('click', async function() {
     
     const formData = new FormData();
     formData.append('image', elements.retryImageInput.files[0]);
+    formData.append('diameter', elements.diameter.value);
+    formData.append('thickness', elements.thickness.value);
+    formData.append('logo_depth', elements.logoDepth.value);
+    formData.append('scale', elements.scale.value);
+    formData.append('nozzle_diameter', elements.nozzleDiameter.value || '0.4');
+    formData.append('top_rotate', elements.topRotate.value);
+    formData.append('bottom_rotate', elements.bottomRotate.value);
+    formData.append('flip_horizontal', elements.flipHorizontal.checked);
+    formData.append('auto_thicken', elements.autoThicken.checked);
     
     try {
         const response = await fetch(`/api/retry/${currentJobId}`, {
@@ -815,7 +831,15 @@ function frameCameraToMeshes() {
     }
 }
 
-function loadSTL(url, material) {
+function setViewerLoading(active, text = 'Loading 3D model...') {
+    if (!elements.viewerLoading) return;
+    elements.viewerLoading.classList.toggle('hidden', !active);
+    if (elements.viewerLoadingText) {
+        elements.viewerLoadingText.textContent = text;
+    }
+}
+
+function loadSTL(url, material, onProgress = null) {
     return new Promise((resolve, reject) => {
         stlLoader.load(url,
             function(geometry) {
@@ -843,13 +867,12 @@ function loadSTL(url, material) {
                     }
                 }
 
-                scene.add(mesh);
-                currentMeshes.push(mesh);
                 resolve(mesh);
             },
             function(progress) {
-                // Loading progress
-                // Loading progress
+                if (onProgress) {
+                    onProgress(progress);
+                }
             },
             function(error) {
                 console.error('Error loading STL:', url, error);
@@ -884,36 +907,47 @@ async function show3DViewer(urls) {
 
 async function loadBodyModel() {
     clearMeshes();
+    setViewerLoading(true, 'Loading body mesh...');
     const material = new THREE.MeshPhongMaterial({ 
         color: 0x3498db,
         specular: 0x444444,
         shininess: 60
     });
     try {
-        await loadSTL(downloadUrls.body, material);
+        const mesh = await loadSTL(downloadUrls.body, material);
+        scene.add(mesh);
+        currentMeshes.push(mesh);
         frameCameraToMeshes();
     } catch (error) {
         console.error('Failed to load body model:', error);
+    } finally {
+        setViewerLoading(false);
     }
 }
 
 async function loadLogosModel() {
     clearMeshes();
+    setViewerLoading(true, 'Loading logos mesh...');
     const material = new THREE.MeshPhongMaterial({ 
         color: 0xe74c3c,
         specular: 0x444444,
         shininess: 60
     });
     try {
-        await loadSTL(downloadUrls.logos, material);
+        const mesh = await loadSTL(downloadUrls.logos, material);
+        scene.add(mesh);
+        currentMeshes.push(mesh);
         frameCameraToMeshes();
     } catch (error) {
         console.error('Failed to load logos model:', error);
+    } finally {
+        setViewerLoading(false);
     }
 }
 
 async function loadBothModels() {
     clearMeshes();
+    setViewerLoading(true, 'Loading body and logos...');
     
     const bodyMaterial = new THREE.MeshPhongMaterial({ 
         color: 0x3498db,
@@ -930,13 +964,45 @@ async function loadBothModels() {
     });
     
     try {
-        await Promise.all([
-            loadSTL(downloadUrls.body, bodyMaterial),
-            loadSTL(downloadUrls.logos, logosMaterial)
+        let bodyReady = false;
+        let logosReady = false;
+
+        const updateLoadingText = () => {
+            if (bodyReady && !logosReady) {
+                setViewerLoading(true, 'Body loaded. Loading logos...');
+            } else if (!bodyReady && logosReady) {
+                setViewerLoading(true, 'Logos loaded. Loading body...');
+            } else if (!bodyReady && !logosReady) {
+                setViewerLoading(true, 'Loading body and logos...');
+            }
+        };
+
+        const [bodyMesh, logosMesh] = await Promise.all([
+            loadSTL(downloadUrls.body, bodyMaterial, () => {
+                updateLoadingText();
+            }).then((mesh) => {
+                bodyReady = true;
+                updateLoadingText();
+                return mesh;
+            }),
+            loadSTL(downloadUrls.logos, logosMaterial, () => {
+                updateLoadingText();
+            }).then((mesh) => {
+                logosReady = true;
+                updateLoadingText();
+                return mesh;
+            })
         ]);
+
+        // Add both together to avoid visual gap between body and logo load.
+        scene.add(bodyMesh);
+        scene.add(logosMesh);
+        currentMeshes.push(bodyMesh, logosMesh);
         frameCameraToMeshes();
     } catch (error) {
         console.error('Failed to load models:', error);
+    } finally {
+        setViewerLoading(false);
     }
 }
 

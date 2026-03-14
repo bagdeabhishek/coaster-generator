@@ -479,8 +479,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--thickness", type=float, default=5.0)
     parser.add_argument("--logo-depth", type=float, default=0.6)
     parser.add_argument("--scale", type=float, default=0.85)
+    parser.add_argument("--nozzle-diameter", type=float, default=0.4)
     parser.add_argument("--flip-horizontal", dest="flip_horizontal", action="store_true", default=True)
     parser.add_argument("--no-flip-horizontal", dest="flip_horizontal", action="store_false")
+    parser.add_argument("--auto-thicken", dest="auto_thicken", action="store_true", default=True)
+    parser.add_argument("--no-auto-thicken", dest="auto_thicken", action="store_false")
     parser.add_argument("--top-rotate", type=int, default=0)
     parser.add_argument("--bottom-rotate", type=int, default=0)
     parser.add_argument("--stamp-text", default="Load Test")
@@ -501,7 +504,9 @@ def main() -> None:
         "thickness": args.thickness,
         "logo_depth": args.logo_depth,
         "scale": args.scale,
+        "nozzle_diameter": args.nozzle_diameter,
         "flip_horizontal": args.flip_horizontal,
+        "auto_thicken": args.auto_thicken,
         "top_rotate": args.top_rotate,
         "bottom_rotate": args.bottom_rotate,
         "stamp_text": args.stamp_text,

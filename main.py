@@ -455,6 +455,8 @@ class ProcessRequest(BaseModel):
     flip_horizontal: bool = True
     top_rotate: int = 0
     bottom_rotate: int = 0
+    nozzle_diameter: float = 0.4
+    auto_thicken: bool = True
 
 
 class StatusResponse(BaseModel):
@@ -1846,6 +1848,8 @@ def run_3d_processing_pipeline(flattened_image: bytes, params: ProcessRequest, j
         flip_horizontal=params.flip_horizontal,
         top_rotate=params.top_rotate,
         bottom_rotate=params.bottom_rotate,
+        nozzle_diameter=params.nozzle_diameter,
+        auto_thicken=params.auto_thicken,
     )
 
     timestamp = datetime.now().strftime("%H%M%S")
@@ -2026,6 +2030,8 @@ async def process_image(
     flip_horizontal: bool = Form(True),
     top_rotate: int = Form(0),
     bottom_rotate: int = Form(0),
+    nozzle_diameter: float = Form(0.4),
+    auto_thicken: bool = Form(True),
     api_key: str = Form(""),
     stamp_text: str = Form("Abhishek Does Stuff")
 ):
@@ -2042,7 +2048,8 @@ async def process_image(
     logger.info(f"Parameters: diameter={diameter}, thickness={thickness}, "
                 f"logo_depth={logo_depth}, scale={scale}, "
                 f"flip_horizontal={flip_horizontal}, top_rotate={top_rotate}, "
-                f"bottom_rotate={bottom_rotate}")
+                f"bottom_rotate={bottom_rotate}, nozzle_diameter={nozzle_diameter}, "
+                f"auto_thicken={auto_thicken}")
 
     # Validate stamp text
     stamp_text = validate_stamp_text(stamp_text)
@@ -2164,7 +2171,9 @@ async def process_image(
         scale=scale,
         flip_horizontal=flip_horizontal,
         top_rotate=top_rotate,
-        bottom_rotate=bottom_rotate
+        bottom_rotate=bottom_rotate,
+        nozzle_diameter=nozzle_diameter,
+        auto_thicken=auto_thicken,
     )
     logger.info("✓ Parameters object created")
 
@@ -2333,7 +2342,9 @@ async def retry_job(
     scale: float = Form(0.85),
     flip_horizontal: bool = Form(True),
     top_rotate: int = Form(0),
-    bottom_rotate: int = Form(0)
+    bottom_rotate: int = Form(0),
+    nozzle_diameter: float = Form(0.4),
+    auto_thicken: bool = Form(True),
 ):
     """Retry with a different image, keeping the same job ID."""
     job = JobStore.get_job(job_id)
@@ -2406,7 +2417,9 @@ async def retry_job(
         scale=scale,
         flip_horizontal=flip_horizontal,
         top_rotate=top_rotate,
-        bottom_rotate=bottom_rotate
+        bottom_rotate=bottom_rotate,
+        nozzle_diameter=nozzle_diameter,
+        auto_thicken=auto_thicken,
     )
     
     # Start background processing with required args

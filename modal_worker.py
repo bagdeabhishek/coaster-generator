@@ -51,7 +51,9 @@ def generate_3d_coaster(
         scale=params.get("scale", 0.85),
         flip_horizontal=params.get("flip_horizontal", True),
         top_rotate=params.get("top_rotate", 0),
-        bottom_rotate=params.get("bottom_rotate", 0)
+        bottom_rotate=params.get("bottom_rotate", 0),
+        nozzle_diameter=params.get("nozzle_diameter", 0.4),
+        auto_thicken=params.get("auto_thicken", True),
     )
     
     # Use a temporary directory inside the container
