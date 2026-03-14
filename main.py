@@ -36,7 +36,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import concurrent.futures
 from tools.coaster_gen import CoasterGenerator
 
@@ -483,14 +483,14 @@ class FileBasedRateLimiter:
 
 class ProcessRequest(BaseModel):
     """Request model for coaster generation."""
-    diameter: float = 100.0
-    thickness: float = 5.0
-    logo_depth: float = 0.6
-    scale: float = 0.85
+    diameter: float = Field(default=100.0, ge=40.0, le=180.0)
+    thickness: float = Field(default=5.0, ge=2.0, le=12.0)
+    logo_depth: float = Field(default=0.6, ge=0.2, le=2.0)
+    scale: float = Field(default=0.85, ge=0.3, le=0.98)
     flip_horizontal: bool = True
-    top_rotate: int = 0
-    bottom_rotate: int = 0
-    nozzle_diameter: float = 0.4
+    top_rotate: int = Field(default=0, ge=0, le=360)
+    bottom_rotate: int = Field(default=0, ge=0, le=360)
+    nozzle_diameter: float = Field(default=0.4, ge=0.2, le=1.2)
     auto_thicken: bool = True
 
 
