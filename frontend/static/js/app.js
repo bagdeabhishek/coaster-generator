@@ -570,6 +570,13 @@ function showReviewSection(jobId) {
     elements.progressSection.classList.add('hidden');
     elements.reviewSection.classList.remove('hidden');
     elements.reviewSection.classList.add('animate-fade-in');
+
+    // Reset review action buttons each time review is shown (including regenerate flow)
+    elements.approveBtn.disabled = false;
+    elements.approveBtn.textContent = 'Approve & Continue';
+    elements.regenerateBtn.disabled = false;
+    elements.regenerateBtn.textContent = 'Regenerate Image';
+    elements.retryBtn.disabled = false;
     
     // Set the review image with cache-busting
     elements.reviewImage.src = `/api/preview-image/${jobId}?t=${Date.now()}`;
