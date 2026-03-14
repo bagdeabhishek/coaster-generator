@@ -2134,6 +2134,7 @@ async def get_frontend(request: Request):
             "default_stamp": "Abhishek Does Stuff",
             "max_stamp_length": 50,
             "google_analytics_id": GOOGLE_ANALYTICS_ID,
+            "support_contact_email": SUPPORT_CONTACT_EMAIL,
         }
     })
 
