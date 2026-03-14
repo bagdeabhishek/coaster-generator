@@ -208,6 +208,7 @@ class Job:
     created_at: datetime = field(default_factory=datetime.now)
     error: Optional[str] = None
     preview_image_path: Optional[str] = None  # Path to saved preview image
+    source_image_path: Optional[str] = None  # Path to original uploaded image for regeneration
     params: Optional['ProcessRequest'] = None  # Store params for confirmation step
     api_key: Optional[str] = None  # User-provided BFL API key (optional)
     uses_own_api_key: bool = False  # Whether user supplied their own BFL key
@@ -226,6 +227,7 @@ class Job:
             "created_at": self.created_at.isoformat(),
             "error": self.error,
             "preview_image_path": self.preview_image_path,
+            "source_image_path": self.source_image_path,
             "params": self.params.dict() if self.params else None,
             "api_key": self.api_key,
             "uses_own_api_key": self.uses_own_api_key,
@@ -245,6 +247,7 @@ class Job:
             files=data.get("files", {}),
             error=data.get("error"),
             preview_image_path=data.get("preview_image_path"),
+            source_image_path=data.get("source_image_path"),
             api_key=data.get("api_key"),
             uses_own_api_key=bool(data.get("uses_own_api_key", False)),
             stamp_text=data.get("stamp_text", "Abhishek Does Stuff"),
@@ -269,6 +272,11 @@ class JobStore:
     def _get_preview_path(job_id: str) -> str:
         """Get file path for preview image."""
         return os.path.join(JOBS_DIR, f"{job_id}_preview.png")
+
+    @staticmethod
+    def _get_source_path(job_id: str) -> str:
+        """Get file path for original source image."""
+        return os.path.join(JOBS_DIR, f"{job_id}_source.png")
     
     @classmethod
     def save_job(cls, job: Job) -> None:
@@ -330,6 +338,33 @@ class JobStore:
         except Exception as e:
             logger.error(f"Failed to load preview image for job {job_id}: {e}")
             return None
+
+    @classmethod
+    def save_source_image(cls, job_id: str, image_bytes: bytes) -> str:
+        """Save original uploaded source image to disk."""
+        source_path = cls._get_source_path(job_id)
+        try:
+            with open(source_path, 'wb') as f:
+                f.write(image_bytes)
+            logger.debug(f"Source image saved for job {job_id}: {source_path}")
+            return source_path
+        except Exception as e:
+            logger.error(f"Failed to save source image for job {job_id}: {e}")
+            raise
+
+    @classmethod
+    def get_source_image(cls, job_id: str) -> Optional[bytes]:
+        """Load original source image from disk."""
+        source_path = cls._get_source_path(job_id)
+        if not os.path.exists(source_path):
+            return None
+
+        try:
+            with open(source_path, 'rb') as f:
+                return f.read()
+        except Exception as e:
+            logger.error(f"Failed to load source image for job {job_id}: {e}")
+            return None
     
     @classmethod
     def cleanup_old_jobs(cls, max_age_hours: int = 24) -> None:
@@ -339,7 +374,7 @@ class JobStore:
             
             # Clean up JSON and preview files in jobs dir
             for filename in os.listdir(JOBS_DIR):
-                if filename.endswith('.json') or filename.endswith('_preview.png'):
+                if filename.endswith('.json') or filename.endswith('_preview.png') or filename.endswith('_source.png'):
                     filepath = os.path.join(JOBS_DIR, filename)
                     file_time = datetime.fromtimestamp(os.path.getmtime(filepath))
                     age_hours = (now - file_time).total_seconds() / 3600
@@ -2144,6 +2179,9 @@ async def process_image(
         owner_user_id=user_id,
         owner_anon_id=None if user_id else get_or_create_anon_session_id(request),
     )
+
+    source_path = JobStore.save_source_image(job_id, image_bytes)
+    job.source_image_path = source_path
     JobStore.save_job(job)
     logger.info(f"✓ Job created: {job_id} with stamp: {stamp_text}")
 
@@ -2330,6 +2368,86 @@ async def confirm_job(job_id: str, request: Request, background_tasks: Backgroun
     return {"job_id": job_id, "status": "processing_vectorize", "message": "Processing vectorization and 3D generation..."}
 
 
+@app.post("/api/regenerate/{job_id}")
+async def regenerate_job(
+    job_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    api_key: str = Form(""),
+):
+    """Regenerate preview image from original source image without re-upload."""
+    job = JobStore.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    enforce_job_access(request, job)
+
+    if job.status != "review":
+        raise HTTPException(status_code=400, detail="Job is not in review state")
+
+    if not job.params:
+        raise HTTPException(status_code=400, detail="Job parameters missing")
+
+    image_bytes = JobStore.get_source_image(job_id)
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="Original image not available for regeneration")
+
+    user_id = request.session.get("user_id")
+    device_fingerprint = request.headers.get("X-Device-Fingerprint")
+    anon_quota_id = None if user_id else f"session:{get_or_create_anon_session_id(request)}"
+    client_ip = get_client_ip(request)
+
+    if job.uses_own_api_key and not api_key:
+        raise HTTPException(status_code=400, detail="Provide your BFL API key to regenerate this image")
+
+    bypass_limit = bool(api_key) and ALLOW_BYPASS_WITH_API_KEY
+    usage_info = {}
+    if not bypass_limit:
+        quota_allowed, quota_message, _, usage_info = await check_quota(
+            anon_quota_id or device_fingerprint,
+            user_id,
+            client_ip,
+        )
+        if not quota_allowed:
+            regen_quota_message = usage_info.get("message") or quota_message
+            regen_quota_message = with_support_contact(regen_quota_message)
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "quota_exceeded",
+                    "message": regen_quota_message,
+                    "next_action": usage_info.get("next_action"),
+                    "usage": usage_info,
+                },
+            )
+
+        quota_bucket = usage_info.get("bucket")
+        if not quota_bucket:
+            raise HTTPException(status_code=500, detail="Quota decision failed")
+
+        quota_event_id = await consume_quota(job_id, anon_quota_id or device_fingerprint, user_id, quota_bucket)
+        if not quota_event_id:
+            raise HTTPException(status_code=500, detail="Unable to reserve quota at this time")
+
+    # Reset Phase-1 status while preserving params, owner, source image and stamp.
+    job.status = "pending"
+    job.progress = 0
+    job.message = "Regenerating image with AI..."
+    job.preview_image_path = None
+    job.error = None
+    job.uses_own_api_key = bool(api_key) if api_key else job.uses_own_api_key
+    JobStore.save_job(job)
+
+    effective_api_key = api_key if api_key else os.environ.get("BFL_API_KEY")
+    if not effective_api_key:
+        raise HTTPException(status_code=500, detail="No API key configured")
+
+    stamp_text = job.stamp_text or "Abhishek Does Stuff"
+    background_tasks.add_task(process_coaster_job, job_id, image_bytes, job.params, stamp_text, effective_api_key)
+
+    return {"job_id": job_id, "status": "processing", "message": "Regenerating image..."}
+
+
 @app.post("/api/retry/{job_id}")
 async def retry_job(
     job_id: str,
@@ -2399,6 +2517,8 @@ async def retry_job(
     job.progress = 0
     job.message = "Restarting with new image..."
     job.preview_image_path = None
+    source_path = JobStore.save_source_image(job_id, image_bytes)
+    job.source_image_path = source_path
     job.error = None
     JobStore.save_job(job)
 
