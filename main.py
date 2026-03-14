@@ -123,6 +123,11 @@ ALLOW_BYPASS_WITH_API_KEY = os.environ.get("ALLOW_BYPASS_WITH_API_KEY", "true").
 LEGACY_RATE_LIMIT_ENABLED = os.environ.get("LEGACY_RATE_LIMIT_ENABLED", "false").lower() == "true"
 MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "10"))
 ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
+TRUSTED_PROXY_HOSTS = [
+    host.strip()
+    for host in os.environ.get("TRUSTED_PROXY_HOSTS", "127.0.0.1,localhost").split(",")
+    if host.strip()
+]
 
 logger.info(f"TEMP_DIR: {TEMP_DIR}")
 logger.info(f"BFL_API_URL: {BFL_API_URL}")
@@ -610,7 +615,8 @@ app.add_middleware(
 )
 
 # Add Proxy headers middleware for correct IP/Scheme behind reverse proxies (like Coolify/Traefik)
-app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=TRUSTED_PROXY_HOSTS)
+logger.info(f"Trusted proxy hosts: {TRUSTED_PROXY_HOSTS}")
 
 # Add session middleware
 if SESSION_SECRET:
