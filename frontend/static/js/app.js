@@ -103,6 +103,7 @@ const elements = {
     
     // Buttons
     approveBtn: document.getElementById('approveBtn'),
+    regenerateBtn: document.getElementById('regenerateBtn'),
     retryBtn: document.getElementById('retryBtn'),
     retryForm: document.getElementById('retryForm'),
     retryImageInput: document.getElementById('retryImageInput'),
@@ -501,6 +502,8 @@ function resetForm() {
     elements.generateBtnText.textContent = 'Generate 3D Coaster';
     elements.approveBtn.disabled = false;
     elements.approveBtn.textContent = 'Approve & Continue';
+    elements.regenerateBtn.disabled = false;
+    elements.regenerateBtn.textContent = 'Regenerate Image';
     elements.retrySubmitBtn.disabled = false;
     elements.retrySubmitBtn.textContent = 'Submit New Image';
 }
@@ -581,6 +584,7 @@ elements.approveBtn.addEventListener('click', async function() {
     if (!currentJobId) return;
     
     this.disabled = true;
+    elements.regenerateBtn.disabled = true;
     elements.retryBtn.disabled = true;
     this.innerHTML = '<span class="animate-spin inline-block mr-2">⟳</span> Processing...';
     
@@ -607,8 +611,61 @@ elements.approveBtn.addEventListener('click', async function() {
     } catch (error) {
         showError(error.message);
         this.disabled = false;
+        elements.regenerateBtn.disabled = false;
         elements.retryBtn.disabled = false;
         this.textContent = 'Approve & Continue';
+    }
+});
+
+// Regenerate button
+elements.regenerateBtn.addEventListener('click', async function() {
+    if (!currentJobId) return;
+
+    this.disabled = true;
+    elements.approveBtn.disabled = true;
+    elements.retryBtn.disabled = true;
+    this.innerHTML = '<span class="animate-spin inline-block mr-2">⟳</span> Regenerating...';
+
+    try {
+        const formData = new FormData();
+        formData.append('api_key', elements.apiKey.value || '');
+
+        const response = await fetch(`/api/regenerate/${currentJobId}`, {
+            method: 'POST',
+            headers: {
+                'X-Device-Fingerprint': getDeviceFingerprint(),
+            },
+            body: formData,
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            if (response.status === 429) {
+                const error = errorData.detail || errorData;
+                await refreshUsage();
+                throw new Error(error.message || 'You have reached your generation limit.');
+            }
+            throw new Error(errorData.detail || errorData.message || 'Failed to regenerate image');
+        }
+
+        await refreshUsage();
+
+        // Hide review and show progress while Phase 1 reruns.
+        elements.reviewSection.classList.add('hidden');
+        elements.viewerSection.classList.add('hidden');
+        elements.downloadsSection.classList.add('hidden');
+        if (elements.emptyState) elements.emptyState.classList.add('hidden');
+        elements.progressSection.classList.remove('hidden');
+
+        // Continue polling same job id.
+        startPolling(currentJobId);
+
+    } catch (error) {
+        showError(error.message);
+        this.disabled = false;
+        this.textContent = 'Regenerate Image';
+        elements.approveBtn.disabled = false;
+        elements.retryBtn.disabled = false;
     }
 });
 
