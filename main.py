@@ -16,10 +16,19 @@ import hashlib
 import re
 import time
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from dataclasses import dataclass, field
 
 import aiohttp
+import numpy as np
+from PIL import Image, ImageOps, UnidentifiedImageError
+
+try:
+    import mediapipe as mp
+except ImportError:
+    mp = None
+
+_FACE_CROP_UNAVAILABLE_LOGGED = False
 
 from fastapi import FastAPI, File, UploadFile, Form, BackgroundTasks, HTTPException, Request, Header
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -117,6 +126,14 @@ RATE_LIMIT_COOLDOWN_HOURS = int(os.environ.get("RATE_LIMIT_COOLDOWN_HOURS", "168
 ALLOW_BYPASS_WITH_API_KEY = os.environ.get("ALLOW_BYPASS_WITH_API_KEY", "true").lower() == "true"
 LEGACY_RATE_LIMIT_ENABLED = os.environ.get("LEGACY_RATE_LIMIT_ENABLED", "false").lower() == "true"
 MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "10"))
+MAX_RAW_FILE_SIZE_MB = int(os.environ.get("MAX_RAW_FILE_SIZE_MB", "30"))
+PREPROCESS_DEFAULT_FACE_CROP = os.environ.get("PREPROCESS_DEFAULT_FACE_CROP", "true").lower() == "true"
+PREPROCESS_DEFAULT_AUTO_DOWNSIZE = os.environ.get("PREPROCESS_DEFAULT_AUTO_DOWNSIZE", "true").lower() == "true"
+PREPROCESS_DEFAULT_FACE_PADDING = float(os.environ.get("PREPROCESS_DEFAULT_FACE_PADDING", "0.35"))
+FACE_DETECT_MIN_CONFIDENCE = float(os.environ.get("FACE_DETECT_MIN_CONFIDENCE", "0.5"))
+FACE_DETECT_MAX_EDGE = int(os.environ.get("FACE_DETECT_MAX_EDGE", "1280"))
+PREPROCESS_MAX_EDGE = int(os.environ.get("PREPROCESS_MAX_EDGE", "2048"))
+PREPROCESS_JPEG_QUALITY = int(os.environ.get("PREPROCESS_JPEG_QUALITY", "90"))
 ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
 TRUSTED_PROXY_HOSTS = [
     host.strip()
@@ -129,6 +146,13 @@ logger.info(f"BFL_API_URL: {BFL_API_URL}")
 logger.info(f"Rate limiting: {RATE_LIMIT_ENABLED} ({RATE_LIMIT_COOLDOWN_HOURS}h cooldown)")
 logger.info(f"Bypass with API key: {ALLOW_BYPASS_WITH_API_KEY}")
 logger.info(f"Legacy weekly limiter enabled: {LEGACY_RATE_LIMIT_ENABLED}")
+logger.info(f"Image upload limits: raw={MAX_RAW_FILE_SIZE_MB}MB, preprocessed_target={MAX_FILE_SIZE_MB}MB")
+logger.info(
+    "Preprocess defaults: face_crop=%s auto_downsize=%s face_padding=%.2f",
+    PREPROCESS_DEFAULT_FACE_CROP,
+    PREPROCESS_DEFAULT_AUTO_DOWNSIZE,
+    PREPROCESS_DEFAULT_FACE_PADDING,
+)
 
 # Auth Configuration
 SESSION_SECRET = os.environ.get("SESSION_SECRET", "")
@@ -1035,6 +1059,227 @@ def get_or_create_anon_session_id(request: Request) -> str:
     return anon_id
 
 
+@dataclass
+class PreprocessOptions:
+    """User-selectable preprocessing controls for uploaded images."""
+    face_crop: bool = PREPROCESS_DEFAULT_FACE_CROP
+    face_crop_padding: float = PREPROCESS_DEFAULT_FACE_PADDING
+    auto_downsize: bool = PREPROCESS_DEFAULT_AUTO_DOWNSIZE
+
+
+def _normalize_preprocess_options(
+    face_crop: bool,
+    face_crop_padding: float,
+    auto_downsize: bool,
+) -> PreprocessOptions:
+    """Clamp user-provided preprocessing options to safe bounds."""
+    padding = max(0.0, min(1.0, float(face_crop_padding)))
+    return PreprocessOptions(
+        face_crop=bool(face_crop),
+        face_crop_padding=padding,
+        auto_downsize=bool(auto_downsize),
+    )
+
+
+def _resize_with_max_edge(image: Image.Image, max_edge: int) -> Image.Image:
+    """Resize image preserving aspect ratio so max dimension is max_edge."""
+    if max_edge <= 0:
+        return image
+
+    width, height = image.size
+    longest = max(width, height)
+    if longest <= max_edge:
+        return image
+
+    scale = max_edge / float(longest)
+    new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+    return image.resize(new_size, Image.LANCZOS)
+
+
+def _detect_largest_face_bbox(image: Image.Image, face_crop_padding: float) -> Optional[Tuple[int, int, int, int]]:
+    """Detect the most relevant face bbox (x1, y1, x2, y2) in image coordinates."""
+    if mp is None:
+        global _FACE_CROP_UNAVAILABLE_LOGGED
+        if not _FACE_CROP_UNAVAILABLE_LOGGED:
+            logger.warning("mediapipe not installed; skipping face crop preprocessing")
+            _FACE_CROP_UNAVAILABLE_LOGGED = True
+        return None
+
+    src_w, src_h = image.size
+    detection_image = _resize_with_max_edge(image, FACE_DETECT_MAX_EDGE)
+    det_w, det_h = detection_image.size
+    scale_x = src_w / det_w
+    scale_y = src_h / det_h
+
+    rgb = np.asarray(detection_image.convert("RGB"))
+
+    best_bbox = None
+    best_score = -1.0
+    center_x = det_w / 2.0
+    center_y = det_h / 2.0
+    norm = max(det_w, det_h) ** 2
+
+    with mp.solutions.face_detection.FaceDetection(
+        model_selection=1,
+        min_detection_confidence=FACE_DETECT_MIN_CONFIDENCE,
+    ) as detector:
+        results = detector.process(rgb)
+
+    detections = results.detections if results and results.detections else []
+    for detection in detections:
+        rel_box = detection.location_data.relative_bounding_box
+        x = int(rel_box.xmin * det_w)
+        y = int(rel_box.ymin * det_h)
+        w = int(rel_box.width * det_w)
+        h = int(rel_box.height * det_h)
+
+        if w <= 0 or h <= 0:
+            continue
+
+        x1 = max(0, x)
+        y1 = max(0, y)
+        x2 = min(det_w, x + w)
+        y2 = min(det_h, y + h)
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        area = float((x2 - x1) * (y2 - y1))
+        face_cx = (x1 + x2) / 2.0
+        face_cy = (y1 + y2) / 2.0
+        dist = ((face_cx - center_x) ** 2 + (face_cy - center_y) ** 2) / norm
+        score = area * (1.0 - 0.25 * min(dist, 1.0))
+
+        if score > best_score:
+            best_score = score
+            best_bbox = (x1, y1, x2, y2)
+
+    if not best_bbox:
+        return None
+
+    bx1, by1, bx2, by2 = best_bbox
+    face_w = bx2 - bx1
+    face_h = by2 - by1
+    pad_x = int(face_w * max(0.0, face_crop_padding))
+    pad_y = int(face_h * max(0.0, face_crop_padding))
+
+    bx1 = max(0, bx1 - pad_x)
+    by1 = max(0, by1 - pad_y)
+    bx2 = min(det_w, bx2 + pad_x)
+    by2 = min(det_h, by2 + pad_y)
+
+    ox1 = int(bx1 * scale_x)
+    oy1 = int(by1 * scale_y)
+    ox2 = int(bx2 * scale_x)
+    oy2 = int(by2 * scale_y)
+
+    ox1 = max(0, min(src_w - 1, ox1))
+    oy1 = max(0, min(src_h - 1, oy1))
+    ox2 = max(ox1 + 1, min(src_w, ox2))
+    oy2 = max(oy1 + 1, min(src_h, oy2))
+
+    return ox1, oy1, ox2, oy2
+
+
+def _encode_jpeg_under_limit(image: Image.Image, max_bytes: int) -> bytes:
+    """Encode image as JPEG under a max byte size with iterative downscaling."""
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+
+    work = _resize_with_max_edge(image, PREPROCESS_MAX_EDGE)
+    quality = max(55, min(PREPROCESS_JPEG_QUALITY, 95))
+    best = b""
+
+    for _ in range(8):
+        buf = io.BytesIO()
+        work.save(buf, format="JPEG", quality=quality, optimize=True)
+        data = buf.getvalue()
+        if not best or len(data) < len(best):
+            best = data
+        if len(data) <= max_bytes:
+            return data
+
+        quality = max(55, quality - 8)
+        next_w = max(512, int(work.width * 0.85))
+        next_h = max(512, int(work.height * 0.85))
+        if next_w == work.width and next_h == work.height:
+            break
+        work = work.resize((next_w, next_h), Image.LANCZOS)
+
+    return best
+
+
+def _encode_jpeg(image: Image.Image, quality: int) -> bytes:
+    """Encode image to JPEG without iterative downsizing."""
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    buf = io.BytesIO()
+    image.save(buf, format="JPEG", quality=max(55, min(quality, 95)), optimize=True)
+    return buf.getvalue()
+
+
+def preprocess_uploaded_image(image_bytes: bytes, options: PreprocessOptions) -> Tuple[bytes, Dict[str, Any]]:
+    """Prepare uploaded image for better BFL reliability (face crop + downsize)."""
+    try:
+        source_image = Image.open(io.BytesIO(image_bytes))
+        orientation_value = source_image.getexif().get(274, 1)
+        source_image = ImageOps.exif_transpose(source_image)
+    except UnidentifiedImageError as exc:
+        raise HTTPException(status_code=400, detail="Invalid image file") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Unable to parse image file") from exc
+
+    face_cropped = False
+    if options.face_crop:
+        try:
+            bbox = _detect_largest_face_bbox(source_image, options.face_crop_padding)
+            if bbox:
+                source_image = source_image.crop(bbox)
+                face_cropped = True
+        except Exception as exc:
+            logger.warning(f"Face crop failed, continuing with original image: {exc}")
+
+    output_limit_bytes = MAX_FILE_SIZE_MB * 1024 * 1024
+    orientation_corrected = orientation_value not in (None, 1)
+    if not face_cropped and not orientation_corrected and len(image_bytes) <= output_limit_bytes:
+        return image_bytes, {
+            "input_bytes": len(image_bytes),
+            "output_bytes": len(image_bytes),
+            "face_cropped": False,
+            "output_format": "original",
+            "passthrough": True,
+        }
+
+    if options.auto_downsize:
+        output_bytes = _encode_jpeg_under_limit(source_image, output_limit_bytes)
+    else:
+        output_bytes = _encode_jpeg(source_image, PREPROCESS_JPEG_QUALITY)
+
+    if len(output_bytes) > output_limit_bytes:
+        detail = (
+            f"Image exceeds {MAX_FILE_SIZE_MB}MB after preprocessing. "
+            "Enable auto-downsize or upload a smaller image."
+        )
+        raise HTTPException(status_code=413, detail=detail)
+
+    meta = {
+        "input_bytes": len(image_bytes),
+        "output_bytes": len(output_bytes),
+        "face_cropped": face_cropped,
+        "auto_downsize": options.auto_downsize,
+        "face_crop": options.face_crop,
+        "face_crop_padding": options.face_crop_padding,
+        "output_format": "jpeg",
+        "passthrough": False,
+    }
+    return output_bytes, meta
+
+
+async def preprocess_uploaded_image_async(image_bytes: bytes, options: PreprocessOptions) -> Tuple[bytes, Dict[str, Any]]:
+    """Async wrapper for image preprocessing."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, preprocess_uploaded_image, image_bytes, options)
+
+
 def enforce_job_access(request: Request, job: Job) -> None:
     """Ensure requester is authorized to access this job."""
     session_user_id = request.session.get("user_id")
@@ -1693,6 +1938,9 @@ async def process_image(
     bottom_rotate: int = Form(0),
     nozzle_diameter: float = Form(0.4),
     auto_thicken: bool = Form(True),
+    preprocess_face_crop: bool = Form(PREPROCESS_DEFAULT_FACE_CROP),
+    preprocess_face_padding: float = Form(PREPROCESS_DEFAULT_FACE_PADDING),
+    preprocess_auto_downsize: bool = Form(PREPROCESS_DEFAULT_AUTO_DOWNSIZE),
     api_key: str = Form(""),
     stamp_text: str = Form("Abhishek Does Stuff")
 ):
@@ -1754,19 +2002,29 @@ async def process_image(
 
     # Read and validate image bytes
     logger.debug("Reading image bytes...")
-    image_bytes = await image.read()
-
-    # Check file size
-    max_size = MAX_FILE_SIZE_MB * 1024 * 1024
-    if len(image_bytes) > max_size:
-        logger.error(f"File too large: {len(image_bytes)} bytes (max {max_size})")
-        raise HTTPException(status_code=413, detail=f"File too large (max {MAX_FILE_SIZE_MB}MB)")
-
-    logger.info(f"✓ Image read: {len(image_bytes)} bytes")
-
-    if len(image_bytes) == 0:
+    raw_image_bytes = await image.read()
+    if len(raw_image_bytes) == 0:
         logger.error("Empty image file received")
         raise HTTPException(status_code=400, detail="Empty image file")
+
+    raw_max_size = MAX_RAW_FILE_SIZE_MB * 1024 * 1024
+    if len(raw_image_bytes) > raw_max_size:
+        logger.error(f"Raw upload too large: {len(raw_image_bytes)} bytes (max {raw_max_size})")
+        raise HTTPException(status_code=413, detail=f"File too large (max {MAX_RAW_FILE_SIZE_MB}MB)")
+
+    preprocess_options = _normalize_preprocess_options(
+        face_crop=preprocess_face_crop,
+        face_crop_padding=preprocess_face_padding,
+        auto_downsize=preprocess_auto_downsize,
+    )
+    image_bytes, preprocess_meta = await preprocess_uploaded_image_async(raw_image_bytes, preprocess_options)
+    logger.info(
+        "✓ Image preprocessed: %s -> %s bytes (face_cropped=%s, auto_downsize=%s)",
+        preprocess_meta.get("input_bytes"),
+        preprocess_meta.get("output_bytes"),
+        preprocess_meta.get("face_cropped"),
+        preprocess_meta.get("auto_downsize"),
+    )
 
     job_id = str(uuid.uuid4())
 
@@ -2061,6 +2319,9 @@ async def retry_job(
     bottom_rotate: int = Form(0),
     nozzle_diameter: float = Form(0.4),
     auto_thicken: bool = Form(True),
+    preprocess_face_crop: bool = Form(PREPROCESS_DEFAULT_FACE_CROP),
+    preprocess_face_padding: float = Form(PREPROCESS_DEFAULT_FACE_PADDING),
+    preprocess_auto_downsize: bool = Form(PREPROCESS_DEFAULT_AUTO_DOWNSIZE),
 ):
     """Retry with a different image, keeping the same job ID."""
     job = JobStore.get_job(job_id)
@@ -2073,13 +2334,31 @@ async def retry_job(
         raise HTTPException(status_code=400, detail="Job is not in review state")
     
     # Validate file type
-    if not image.content_type.startswith("image/"):
+    if not image.content_type or not image.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
     
     # Read image bytes
-    image_bytes = await image.read()
-    if len(image_bytes) == 0:
+    raw_image_bytes = await image.read()
+    if len(raw_image_bytes) == 0:
         raise HTTPException(status_code=400, detail="Empty image file")
+
+    raw_max_size = MAX_RAW_FILE_SIZE_MB * 1024 * 1024
+    if len(raw_image_bytes) > raw_max_size:
+        raise HTTPException(status_code=413, detail=f"File too large (max {MAX_RAW_FILE_SIZE_MB}MB)")
+
+    preprocess_options = _normalize_preprocess_options(
+        face_crop=preprocess_face_crop,
+        face_crop_padding=preprocess_face_padding,
+        auto_downsize=preprocess_auto_downsize,
+    )
+    image_bytes, preprocess_meta = await preprocess_uploaded_image_async(raw_image_bytes, preprocess_options)
+    logger.info(
+        "Retry image preprocessed: %s -> %s bytes (face_cropped=%s, auto_downsize=%s)",
+        preprocess_meta.get("input_bytes"),
+        preprocess_meta.get("output_bytes"),
+        preprocess_meta.get("face_cropped"),
+        preprocess_meta.get("auto_downsize"),
+    )
 
     user_id, device_fingerprint, anon_quota_id, client_ip = _resolve_identity_context(request)
     
@@ -2135,6 +2414,10 @@ async def get_frontend(request: Request):
             "max_stamp_length": 50,
             "google_analytics_id": GOOGLE_ANALYTICS_ID,
             "support_contact_email": SUPPORT_CONTACT_EMAIL,
+            "preprocess_default_face_crop": PREPROCESS_DEFAULT_FACE_CROP,
+            "preprocess_default_face_padding": PREPROCESS_DEFAULT_FACE_PADDING,
+            "preprocess_default_auto_downsize": PREPROCESS_DEFAULT_AUTO_DOWNSIZE,
+            "max_preprocessed_size_mb": MAX_FILE_SIZE_MB,
         }
     })
 

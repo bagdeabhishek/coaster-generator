@@ -217,6 +217,26 @@
     max-height: 320px !important;
 }
 
+#viewerContainer:fullscreen,
+#viewerContainer:-webkit-full-screen,
+#viewerContainer:-moz-full-screen {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+    z-index: 9999;
+}
+
+#viewerContainer:fullscreen canvas,
+#viewerContainer:-webkit-full-screen canvas,
+#viewerContainer:-moz-full-screen canvas {
+    width: 100vw !important;
+    height: 100vh !important;
+    max-height: none !important;
+}
+
 /* Ensure sections don't overflow */
 #viewerSection > div,
 #downloadsSection > div {

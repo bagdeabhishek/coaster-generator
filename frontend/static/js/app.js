@@ -71,6 +71,9 @@ const elements = {
     bottomRotate: document.getElementById('bottomRotate'),
     flipHorizontal: document.getElementById('flipHorizontal'),
     autoThicken: document.getElementById('autoThicken'),
+    preprocessFaceCrop: document.getElementById('preprocessFaceCrop'),
+    preprocessFacePadding: document.getElementById('preprocessFacePadding'),
+    preprocessAutoDownsize: document.getElementById('preprocessAutoDownsize'),
     generateBtn: document.getElementById('generateBtn'),
     generateBtnText: document.getElementById('generateBtnText'),
     
@@ -400,11 +403,27 @@ function showImagePreview(file) {
 
 function initForm() {
     elements.generateBtn.addEventListener('click', handleSubmit);
+
+    if (elements.preprocessFaceCrop && elements.preprocessFacePadding) {
+        const syncFacePaddingState = () => {
+            const enabled = elements.preprocessFaceCrop.checked;
+            elements.preprocessFacePadding.disabled = !enabled;
+            elements.preprocessFacePadding.classList.toggle('opacity-50', !enabled);
+        };
+        elements.preprocessFaceCrop.addEventListener('change', syncFacePaddingState);
+        syncFacePaddingState();
+    }
     
     elements.dismissErrorBtn.addEventListener('click', () => {
         elements.errorSection.classList.add('hidden');
         if(elements.emptyState) elements.emptyState.classList.remove('hidden');
     });
+}
+
+function appendPreprocessSettings(formData) {
+    formData.append('preprocess_face_crop', elements.preprocessFaceCrop ? elements.preprocessFaceCrop.checked : true);
+    formData.append('preprocess_face_padding', elements.preprocessFacePadding ? elements.preprocessFacePadding.value || '0.35' : '0.35');
+    formData.append('preprocess_auto_downsize', elements.preprocessAutoDownsize ? elements.preprocessAutoDownsize.checked : true);
 }
 
 async function handleSubmit() {
@@ -431,6 +450,7 @@ async function handleSubmit() {
     formData.append('bottom_rotate', elements.bottomRotate.value);
     formData.append('flip_horizontal', elements.flipHorizontal.checked);
     formData.append('auto_thicken', elements.autoThicken.checked);
+    appendPreprocessSettings(formData);
     
     // Show loading state
     elements.generateBtn.disabled = true;
@@ -748,6 +768,7 @@ elements.retrySubmitBtn.addEventListener('click', async function() {
     formData.append('bottom_rotate', elements.bottomRotate.value);
     formData.append('flip_horizontal', elements.flipHorizontal.checked);
     formData.append('auto_thicken', elements.autoThicken.checked);
+    appendPreprocessSettings(formData);
     
     try {
         const response = await fetch(`/api/retry/${currentJobId}`, {
@@ -863,31 +884,75 @@ function init3DViewer() {
     
     // Handle resize
     window.addEventListener('resize', onWindowResize, false);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
     
     // Fullscreen button
     elements.fullscreenBtn.addEventListener('click', toggleFullscreen);
+    updateFullscreenButtonLabel();
     
     // Start animation loop
     animate();
 }
 
+function getFullscreenElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+function requestElementFullscreen(element) {
+    if (!element) {
+        return Promise.reject(new Error('No element selected for fullscreen'));
+    }
+    const request = element.requestFullscreen || element.webkitRequestFullscreen;
+    if (!request) {
+        return Promise.reject(new Error('Fullscreen API is not supported in this browser'));
+    }
+    const result = request.call(element);
+    return result && typeof result.then === 'function' ? result : Promise.resolve();
+}
+
+function exitDocumentFullscreen() {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (!exit) {
+        return Promise.reject(new Error('Exit fullscreen API is not supported in this browser'));
+    }
+    const result = exit.call(document);
+    return result && typeof result.then === 'function' ? result : Promise.resolve();
+}
+
+function updateFullscreenButtonLabel() {
+    if (!elements.fullscreenBtn) return;
+    const active = getFullscreenElement() === elements.viewerContainer;
+    elements.fullscreenBtn.textContent = active ? '⤢ Exit Fullscreen' : '⛶ Fullscreen';
+}
+
+function handleFullscreenChange() {
+    updateFullscreenButtonLabel();
+    setTimeout(onWindowResize, 50);
+}
+
 function toggleFullscreen() {
-    if (!document.fullscreenElement) {
-        elements.viewerContainer.requestFullscreen().catch(err => {
-            // Fullscreen not supported; ignore
+    const fullscreenElement = getFullscreenElement();
+    if (fullscreenElement === elements.viewerContainer) {
+        exitDocumentFullscreen().catch((err) => {
+            console.warn('Failed to exit fullscreen:', err);
         });
     } else {
-        document.exitFullscreen();
+        requestElementFullscreen(elements.viewerContainer).catch((err) => {
+            console.warn('Failed to enter fullscreen:', err);
+        });
     }
 }
 
 function onWindowResize() {
     if (!camera || !renderer) return;
     
-    const aspect = elements.viewerContainer.clientWidth / elements.viewerContainer.clientHeight;
+    const width = Math.max(1, elements.viewerContainer.clientWidth || elements.viewerContainer.offsetWidth || 800);
+    const height = Math.max(1, elements.viewerContainer.clientHeight || elements.viewerContainer.offsetHeight || 600);
+    const aspect = width / height;
     camera.aspect = aspect;
     camera.updateProjectionMatrix();
-    renderer.setSize(elements.viewerContainer.clientWidth, elements.viewerContainer.clientHeight);
+    renderer.setSize(width, height);
 }
 
 function animate() {

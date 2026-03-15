@@ -20,3 +20,4 @@ dodopayments==1.84.0
 modal>=0.70.0
 itsdangerous==2.2.0
 psycopg2-binary==2.9.9
+mediapipe==0.10.21
