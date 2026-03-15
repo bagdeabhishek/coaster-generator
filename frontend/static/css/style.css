@@ -204,10 +204,14 @@
 #viewerContainer {
     position: relative;
     width: 100% !important;
-    height: 320px !important;
-    max-height: 320px !important;
-    overflow: hidden !important;
     box-sizing: border-box;
+}
+
+/* Normal state class */
+.viewer-container-normal {
+    height: 400px !important;
+    max-height: 400px !important;
+    overflow: hidden !important;
 }
 
 #viewerContainer canvas {

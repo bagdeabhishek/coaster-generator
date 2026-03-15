@@ -928,11 +928,22 @@ function updateFullscreenButtonLabel() {
 
 function handleFullscreenChange() {
     updateFullscreenButtonLabel();
+    
+    const isFullscreen = getFullscreenElement() === elements.viewerContainer;
+    
+    // Toggle normal state class
+    if (isFullscreen) {
+        elements.viewerContainer.classList.remove('viewer-container-normal');
+    } else {
+        elements.viewerContainer.classList.add('viewer-container-normal');
+    }
+    
     // Delay resize to ensure browser has applied fullscreen dimensions
-    // Use multiple calls to handle any timing issues
-    setTimeout(onWindowResize, 100);
-    setTimeout(onWindowResize, 300);
-    setTimeout(onWindowResize, 600);
+    requestAnimationFrame(() => {
+        onWindowResize();
+        // Double-check after a short delay
+        setTimeout(onWindowResize, 100);
+    });
 }
 
 function toggleFullscreen() {
@@ -951,20 +962,26 @@ function toggleFullscreen() {
 function onWindowResize() {
     if (!camera || !renderer) return;
     
-    const width = Math.max(1, elements.viewerContainer.clientWidth || elements.viewerContainer.offsetWidth || window.innerWidth);
-    const height = Math.max(1, elements.viewerContainer.clientHeight || elements.viewerContainer.offsetHeight || window.innerHeight);
+    // When in fullscreen, always use window dimensions
+    // Otherwise use container dimensions
+    const isFullscreen = getFullscreenElement() === elements.viewerContainer;
     
-    console.log('Resizing viewer to:', width, 'x', height);
+    let width, height;
+    if (isFullscreen) {
+        width = window.innerWidth;
+        height = window.innerHeight;
+    } else {
+        const rect = elements.viewerContainer.getBoundingClientRect();
+        width = Math.max(1, rect.width || elements.viewerContainer.clientWidth || 800);
+        height = Math.max(1, rect.height || elements.viewerContainer.clientHeight || 600);
+    }
+    
+    console.log('Resizing viewer to:', width, 'x', height, isFullscreen ? '(fullscreen)' : '(normal)');
     
     const aspect = width / height;
     camera.aspect = aspect;
     camera.updateProjectionMatrix();
-    renderer.setSize(width, height, false);
-    
-    // Force a render update
-    if (scene) {
-        renderer.render(scene, camera);
-    }
+    renderer.setSize(width, height, true);
 }
 
 function animate() {
