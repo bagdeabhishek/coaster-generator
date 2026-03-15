@@ -204,50 +204,16 @@
 #viewerContainer {
     position: relative;
     width: 100% !important;
-    box-sizing: border-box;
-}
-
-/* Normal state class */
-.viewer-container-normal {
     height: 400px !important;
     max-height: 400px !important;
     overflow: hidden !important;
+    box-sizing: border-box;
 }
 
 #viewerContainer canvas {
     display: block;
     width: 100% !important;
     height: 100% !important;
-    max-height: 320px !important;
-}
-
-#viewerContainer:fullscreen,
-#viewerContainer:-webkit-full-screen,
-#viewerContainer:-moz-full-screen,
-#viewerContainer:fullscreen {
-    position: fixed !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    width: 100vw !important;
-    height: 100vh !important;
-    max-height: none !important;
-    min-height: 100vh !important;
-    border-radius: 0 !important;
-    z-index: 9999;
-    background: #000 !important;
-}
-
-#viewerContainer:fullscreen canvas,
-#viewerContainer:-webkit-full-screen canvas,
-#viewerContainer:-moz-full-screen canvas,
-#viewerContainer:fullscreen canvas {
-    width: 100% !important;
-    height: 100% !important;
-    max-height: none !important;
-    min-height: 100% !important;
-    display: block !important;
 }
 
 /* Ensure sections don't overflow */

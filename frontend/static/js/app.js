@@ -928,22 +928,7 @@ function updateFullscreenButtonLabel() {
 
 function handleFullscreenChange() {
     updateFullscreenButtonLabel();
-    
-    const isFullscreen = getFullscreenElement() === elements.viewerContainer;
-    
-    // Toggle normal state class
-    if (isFullscreen) {
-        elements.viewerContainer.classList.remove('viewer-container-normal');
-    } else {
-        elements.viewerContainer.classList.add('viewer-container-normal');
-    }
-    
-    // Delay resize to ensure browser has applied fullscreen dimensions
-    requestAnimationFrame(() => {
-        onWindowResize();
-        // Double-check after a short delay
-        setTimeout(onWindowResize, 100);
-    });
+    setTimeout(onWindowResize, 50);
 }
 
 function toggleFullscreen() {
@@ -962,26 +947,10 @@ function toggleFullscreen() {
 function onWindowResize() {
     if (!camera || !renderer) return;
     
-    // When in fullscreen, always use window dimensions
-    // Otherwise use container dimensions
-    const isFullscreen = getFullscreenElement() === elements.viewerContainer;
-    
-    let width, height;
-    if (isFullscreen) {
-        width = window.innerWidth;
-        height = window.innerHeight;
-    } else {
-        const rect = elements.viewerContainer.getBoundingClientRect();
-        width = Math.max(1, rect.width || elements.viewerContainer.clientWidth || 800);
-        height = Math.max(1, rect.height || elements.viewerContainer.clientHeight || 600);
-    }
-    
-    console.log('Resizing viewer to:', width, 'x', height, isFullscreen ? '(fullscreen)' : '(normal)');
-    
-    const aspect = width / height;
+    const aspect = elements.viewerContainer.clientWidth / elements.viewerContainer.clientHeight;
     camera.aspect = aspect;
     camera.updateProjectionMatrix();
-    renderer.setSize(width, height, true);
+    renderer.setSize(elements.viewerContainer.clientWidth, elements.viewerContainer.clientHeight);
 }
 
 function animate() {
