@@ -928,7 +928,11 @@ function updateFullscreenButtonLabel() {
 
 function handleFullscreenChange() {
     updateFullscreenButtonLabel();
-    setTimeout(onWindowResize, 50);
+    // Delay resize to ensure browser has applied fullscreen dimensions
+    // Use multiple calls to handle any timing issues
+    setTimeout(onWindowResize, 100);
+    setTimeout(onWindowResize, 300);
+    setTimeout(onWindowResize, 600);
 }
 
 function toggleFullscreen() {
@@ -947,12 +951,20 @@ function toggleFullscreen() {
 function onWindowResize() {
     if (!camera || !renderer) return;
     
-    const width = Math.max(1, elements.viewerContainer.clientWidth || elements.viewerContainer.offsetWidth || 800);
-    const height = Math.max(1, elements.viewerContainer.clientHeight || elements.viewerContainer.offsetHeight || 600);
+    const width = Math.max(1, elements.viewerContainer.clientWidth || elements.viewerContainer.offsetWidth || window.innerWidth);
+    const height = Math.max(1, elements.viewerContainer.clientHeight || elements.viewerContainer.offsetHeight || window.innerHeight);
+    
+    console.log('Resizing viewer to:', width, 'x', height);
+    
     const aspect = width / height;
     camera.aspect = aspect;
     camera.updateProjectionMatrix();
-    renderer.setSize(width, height);
+    renderer.setSize(width, height, false);
+    
+    // Force a render update
+    if (scene) {
+        renderer.render(scene, camera);
+    }
 }
 
 function animate() {
