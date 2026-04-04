@@ -48,6 +48,8 @@ def generate_3d_coaster(
         diameter=params.get("diameter", 100),
         thickness=params.get("thickness", 5),
         logo_depth=params.get("logo_depth", 0.6),
+        top_logo_depth=params.get("top_logo_depth", params.get("logo_depth", 0.6)),
+        bottom_logo_depth=params.get("logo_depth", 0.6),
         top_logo_height=params.get("top_logo_height", 0.0),
         scale=params.get("scale", 0.85),
         flip_horizontal=params.get("flip_horizontal", True),

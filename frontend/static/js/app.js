@@ -65,6 +65,7 @@ const elements = {
     diameter: document.getElementById('diameter'),
     thickness: document.getElementById('thickness'),
     logoDepth: document.getElementById('logoDepth'),
+    topLogoDepth: document.getElementById('topLogoDepth'),
     topLogoHeight: document.getElementById('topLogoHeight'),
     scale: document.getElementById('scale'),
     nozzleDiameter: document.getElementById('nozzleDiameter'),
@@ -445,6 +446,7 @@ async function handleSubmit() {
     formData.append('diameter', elements.diameter.value);
     formData.append('thickness', elements.thickness.value);
     formData.append('logo_depth', elements.logoDepth.value);
+    formData.append('top_logo_depth', elements.topLogoDepth ? elements.topLogoDepth.value || elements.logoDepth.value : elements.logoDepth.value);
     formData.append('top_logo_height', elements.topLogoHeight ? elements.topLogoHeight.value || '0.0' : '0.0');
     formData.append('scale', elements.scale.value);
     formData.append('nozzle_diameter', elements.nozzleDiameter.value || '0.4');
@@ -694,6 +696,7 @@ elements.regenerateBtn.addEventListener('click', async function() {
         formData.append('diameter', elements.diameter.value);
         formData.append('thickness', elements.thickness.value);
         formData.append('logo_depth', elements.logoDepth.value);
+        formData.append('top_logo_depth', elements.topLogoDepth ? elements.topLogoDepth.value || elements.logoDepth.value : elements.logoDepth.value);
         formData.append('top_logo_height', elements.topLogoHeight ? elements.topLogoHeight.value || '0.0' : '0.0');
         formData.append('scale', elements.scale.value);
         formData.append('nozzle_diameter', elements.nozzleDiameter.value || '0.4');
@@ -765,6 +768,7 @@ elements.retrySubmitBtn.addEventListener('click', async function() {
     formData.append('diameter', elements.diameter.value);
     formData.append('thickness', elements.thickness.value);
     formData.append('logo_depth', elements.logoDepth.value);
+    formData.append('top_logo_depth', elements.topLogoDepth ? elements.topLogoDepth.value || elements.logoDepth.value : elements.logoDepth.value);
     formData.append('top_logo_height', elements.topLogoHeight ? elements.topLogoHeight.value || '0.0' : '0.0');
     formData.append('scale', elements.scale.value);
     formData.append('nozzle_diameter', elements.nozzleDiameter.value || '0.4');
