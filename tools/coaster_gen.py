@@ -26,6 +26,7 @@ class CoasterParams:
     diameter: float = 100.0
     thickness: float = 5.0
     logo_depth: float = 0.6
+    top_logo_height: float = 0.0
     scale: float = 0.85
     flip_horizontal: bool = True
     top_rotate: int = 0
@@ -40,6 +41,7 @@ class CoasterGenerator:
         diameter: float = 100.0,
         thickness: float = 5.0,
         logo_depth: float = 0.6,
+        top_logo_height: float = 0.0,
         scale: float = 0.85,
         flip_horizontal: bool = True,
         top_rotate: int = 0,
@@ -51,6 +53,7 @@ class CoasterGenerator:
             diameter=diameter,
             thickness=thickness,
             logo_depth=logo_depth,
+            top_logo_height=top_logo_height,
             scale=scale,
             flip_horizontal=flip_horizontal,
             top_rotate=top_rotate,
@@ -379,13 +382,20 @@ class CoasterGenerator:
 
         logos_combined = trimesh.util.concatenate(logo_meshes)
 
+        # Top logo can optionally protrude above the coaster surface.
+        top_logo_height = max(0.0, float(p.top_logo_height))
+        top_extrude_height = p.logo_depth + top_logo_height
         top_logo = logos_combined.copy()
+        if top_extrude_height != p.logo_depth and p.logo_depth > 0:
+            top_logo.apply_scale([1.0, 1.0, top_extrude_height / p.logo_depth])
+
         if p.top_rotate != 0:
             top_logo.apply_transform(
                 trimesh.transformations.rotation_matrix(np.radians(p.top_rotate), [0, 0, 1])
             )
         top_logo.apply_translation([0, 0, (p.thickness / 2) - p.logo_depth])
 
+        # Bottom logo keeps existing inset-only behavior.
         bottom_logo = logos_combined.copy()
         if p.bottom_rotate != 0:
             bottom_logo.apply_transform(

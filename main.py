@@ -520,6 +520,7 @@ class ProcessRequest(BaseModel):
     diameter: float = Field(default=100.0, ge=40.0, le=180.0)
     thickness: float = Field(default=5.0, ge=2.0, le=12.0)
     logo_depth: float = Field(default=0.6, ge=0.2, le=2.0)
+    top_logo_height: float = Field(default=0.0, ge=0.0, le=2.0)
     scale: float = Field(default=0.85, ge=0.3, le=0.98)
     flip_horizontal: bool = True
     top_rotate: int = Field(default=0, ge=0, le=360)
@@ -1657,6 +1658,7 @@ def run_3d_processing_pipeline(flattened_image: bytes, params: ProcessRequest, j
         diameter=params.diameter,
         thickness=params.thickness,
         logo_depth=params.logo_depth,
+        top_logo_height=params.top_logo_height,
         scale=params.scale,
         flip_horizontal=params.flip_horizontal,
         top_rotate=params.top_rotate,
@@ -1844,6 +1846,7 @@ def _build_process_params(
     diameter: float,
     thickness: float,
     logo_depth: float,
+    top_logo_height: float,
     scale: float,
     flip_horizontal: bool,
     top_rotate: int,
@@ -1856,6 +1859,7 @@ def _build_process_params(
         diameter=diameter,
         thickness=thickness,
         logo_depth=logo_depth,
+        top_logo_height=top_logo_height,
         scale=scale,
         flip_horizontal=flip_horizontal,
         top_rotate=top_rotate,
@@ -1932,6 +1936,7 @@ async def process_image(
     diameter: float = Form(100.0),
     thickness: float = Form(5.0),
     logo_depth: float = Form(0.6),
+    top_logo_height: float = Form(0.0),
     scale: float = Form(0.85),
     flip_horizontal: bool = Form(True),
     top_rotate: int = Form(0),
@@ -2059,6 +2064,7 @@ async def process_image(
         diameter=diameter,
         thickness=thickness,
         logo_depth=logo_depth,
+        top_logo_height=top_logo_height,
         scale=scale,
         flip_horizontal=flip_horizontal,
         top_rotate=top_rotate,
@@ -2231,6 +2237,7 @@ async def regenerate_job(
     diameter: Optional[float] = Form(None),
     thickness: Optional[float] = Form(None),
     logo_depth: Optional[float] = Form(None),
+    top_logo_height: Optional[float] = Form(None),
     scale: Optional[float] = Form(None),
     flip_horizontal: Optional[bool] = Form(None),
     top_rotate: Optional[int] = Form(None),
@@ -2258,6 +2265,7 @@ async def regenerate_job(
         diameter=diameter if diameter is not None else current_params.diameter,
         thickness=thickness if thickness is not None else current_params.thickness,
         logo_depth=logo_depth if logo_depth is not None else current_params.logo_depth,
+        top_logo_height=top_logo_height if top_logo_height is not None else current_params.top_logo_height,
         scale=scale if scale is not None else current_params.scale,
         flip_horizontal=flip_horizontal if flip_horizontal is not None else current_params.flip_horizontal,
         top_rotate=top_rotate if top_rotate is not None else current_params.top_rotate,
@@ -2313,6 +2321,7 @@ async def retry_job(
     diameter: float = Form(100.0),
     thickness: float = Form(5.0),
     logo_depth: float = Form(0.6),
+    top_logo_height: float = Form(0.0),
     scale: float = Form(0.85),
     flip_horizontal: bool = Form(True),
     top_rotate: int = Form(0),
@@ -2376,6 +2385,7 @@ async def retry_job(
         diameter=diameter,
         thickness=thickness,
         logo_depth=logo_depth,
+        top_logo_height=top_logo_height,
         scale=scale,
         flip_horizontal=flip_horizontal,
         top_rotate=top_rotate,
