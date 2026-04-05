@@ -40,6 +40,7 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from pydantic import BaseModel, Field
 import concurrent.futures
 from tools.coaster_gen import CoasterGenerator
+from tools.coaster_holder import build_vase_safe_holder_mesh
 
 # Auth and billing
 try:
@@ -219,6 +220,11 @@ logger.info(f"Temp directory ensured: {os.path.abspath(TEMP_DIR)}")
 JOBS_DIR = os.path.join(TEMP_DIR, "jobs")
 os.makedirs(JOBS_DIR, exist_ok=True)
 logger.info(f"Jobs directory: {JOBS_DIR}")
+
+# Global holder cache (shared across all users/jobs)
+HOLDER_CACHE_DIR = os.path.join(TEMP_DIR, "holders_cache")
+os.makedirs(HOLDER_CACHE_DIR, exist_ok=True)
+logger.info(f"Holder cache directory: {HOLDER_CACHE_DIR}")
 
 
 @dataclass
@@ -528,6 +534,8 @@ class ProcessRequest(BaseModel):
     bottom_rotate: int = Field(default=0, ge=0, le=360)
     nozzle_diameter: float = Field(default=0.4, ge=0.2, le=1.2)
     auto_thicken: bool = True
+    print_container: bool = False
+    container_coaster_count: int = Field(default=6, ge=1, le=50)
 
 
 class StatusResponse(BaseModel):
@@ -1650,6 +1658,51 @@ async def process_coaster_job(
             job.error = error_message
             JobStore.save_job(job)
 
+def _holder_cache_key(params: ProcessRequest) -> str:
+    wall = max(0.35, min(float(params.nozzle_diameter), 1.0))
+    return (
+        "holder-v1"
+        f"-d{params.diameter:.2f}"
+        f"-t{params.thickness:.2f}"
+        f"-n{int(params.container_coaster_count)}"
+        f"-w{wall:.2f}"
+        "-rc1.20-tc1.00-b0.80"
+    ).replace(".", "p")
+
+
+def _resolve_holder_assets(params: ProcessRequest) -> tuple[str, str, Any, dict]:
+    """Get or create globally cached holder assets for the given geometry profile."""
+    cache_key = _holder_cache_key(params)
+    holder_stl_path = os.path.join(HOLDER_CACHE_DIR, f"{cache_key}.stl")
+    holder_3mf_path = os.path.join(HOLDER_CACHE_DIR, f"{cache_key}.3mf")
+    lock_path = os.path.join(HOLDER_CACHE_DIR, f"{cache_key}.lock")
+
+    with open(lock_path, "w") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            if os.path.exists(holder_stl_path) and os.path.exists(holder_3mf_path):
+                import trimesh
+
+                holder_mesh = trimesh.load(holder_stl_path, force="mesh")
+                return holder_3mf_path, holder_stl_path, holder_mesh, {"cache_key": cache_key, "cache_hit": True}
+
+            holder_mesh, dims = build_vase_safe_holder_mesh(
+                coaster_diameter=params.diameter,
+                coaster_thickness=params.thickness,
+                coaster_count=params.container_coaster_count,
+                nozzle_diameter=params.nozzle_diameter,
+            )
+            holder_mesh.export(holder_stl_path)
+            CoasterGenerator.export_single_mesh_3mf(holder_mesh, holder_3mf_path, object_name="coaster_holder")
+            return holder_3mf_path, holder_stl_path, holder_mesh, {
+                "cache_key": cache_key,
+                "cache_hit": False,
+                **dims,
+            }
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
 def run_3d_processing_pipeline(flattened_image: bytes, params: ProcessRequest, job_id: str):
     """
     Pure synchronous function that runs the heavy CPU bounds tasks.
@@ -1677,14 +1730,27 @@ def run_3d_processing_pipeline(flattened_image: bytes, params: ProcessRequest, j
     with open(temp_input_path, "wb") as f:
         f.write(flattened_image)
 
+    holder_3mf_path = None
+    holder_stl_path = None
+    holder_mesh_for_bundle = None
+
     try:
-        return generator.generate_coaster(
+        if params.print_container:
+            holder_3mf_path, holder_stl_path, holder_mesh, holder_meta = _resolve_holder_assets(params)
+            # Place holder beside coaster so bundled 3MF opens with separate printable objects.
+            holder_mesh_for_bundle = holder_mesh.copy()
+            holder_offset_x = (params.diameter * 1.2) + (holder_meta.get("outer_radius", 0.0) * 1.2) + 6.0
+            holder_mesh_for_bundle.apply_translation([holder_offset_x, 0.0, -params.thickness / 2])
+
+        coaster_3mf_path, body_stl_path, logos_stl_path = generator.generate_coaster(
             input_image_path=temp_input_path,
             output_dir=TEMP_DIR,
             stamp_text="",
             is_preview=False,
             file_prefix=file_prefix,
+            holder_mesh=holder_mesh_for_bundle,
         )
+        return coaster_3mf_path, body_stl_path, logos_stl_path, holder_3mf_path, holder_stl_path
     finally:
         if os.path.exists(temp_input_path):
             os.remove(temp_input_path)
@@ -1718,7 +1784,7 @@ async def process_vectorization_3d(job_id: str):
         
         # Check active local tasks to decide routing
         local_slot_reserved = False
-        force_local = bool(getattr(job, "uses_own_api_key", False))
+        force_local = bool(getattr(job, "uses_own_api_key", False)) or bool(getattr(params, "print_container", False))
         async with tasks_lock:
             current_active = active_local_tasks
             if force_local:
@@ -1732,6 +1798,9 @@ async def process_vectorization_3d(job_id: str):
             else:
                 route_to_modal = True
                 
+        holder_3mf_path = None
+        holder_stl_path = None
+
         try:
             if route_to_modal and USE_MODAL_FALLBACK:
                 logger.info("ROUTING TO CLOUD: Local pool full, bursting to Modal...")
@@ -1783,7 +1852,13 @@ async def process_vectorization_3d(job_id: str):
                 
                 # Run the heavy CPU math in the local ProcessPoolExecutor
                 loop = asyncio.get_running_loop()
-                coaster_3mf_path, body_stl_path, logos_stl_path = await loop.run_in_executor(
+                (
+                    coaster_3mf_path,
+                    body_stl_path,
+                    logos_stl_path,
+                    holder_3mf_path,
+                    holder_stl_path,
+                ) = await loop.run_in_executor(
                     process_pool,
                     run_3d_processing_pipeline,
                     flattened_image,
@@ -1807,6 +1882,10 @@ async def process_vectorization_3d(job_id: str):
             "body": body_stl_path,
             "logos": logos_stl_path
         }
+        if holder_3mf_path and os.path.exists(holder_3mf_path):
+            job.files["holder_3mf"] = holder_3mf_path
+        if holder_stl_path and os.path.exists(holder_stl_path):
+            job.files["holder_stl"] = holder_stl_path
         job.status = "completed"
         job.progress = 100
         job.message = "Coaster generation complete!"
@@ -1857,6 +1936,8 @@ def _build_process_params(
     bottom_rotate: int,
     nozzle_diameter: float,
     auto_thicken: bool,
+    print_container: bool,
+    container_coaster_count: int,
 ) -> ProcessRequest:
     """Create normalized ProcessRequest model from endpoint inputs."""
     if top_logo_depth <= 0 and top_logo_height <= 0:
@@ -1877,6 +1958,8 @@ def _build_process_params(
         bottom_rotate=bottom_rotate,
         nozzle_diameter=nozzle_diameter,
         auto_thicken=auto_thicken,
+        print_container=print_container,
+        container_coaster_count=container_coaster_count,
     )
 
 
@@ -1955,6 +2038,8 @@ async def process_image(
     bottom_rotate: int = Form(0),
     nozzle_diameter: float = Form(0.4),
     auto_thicken: bool = Form(True),
+    print_container: bool = Form(False),
+    container_coaster_count: int = Form(6),
     preprocess_face_crop: bool = Form(PREPROCESS_DEFAULT_FACE_CROP),
     preprocess_face_padding: float = Form(PREPROCESS_DEFAULT_FACE_PADDING),
     preprocess_auto_downsize: bool = Form(PREPROCESS_DEFAULT_AUTO_DOWNSIZE),
@@ -2084,6 +2169,8 @@ async def process_image(
         bottom_rotate=bottom_rotate,
         nozzle_diameter=nozzle_diameter,
         auto_thicken=auto_thicken,
+        print_container=print_container,
+        container_coaster_count=container_coaster_count,
     )
     logger.info("✓ Parameters object created")
 
@@ -2120,6 +2207,8 @@ async def get_status(job_id: str, request: Request):
             "body": f"/api/download/{job_id}/body",
             "logos": f"/api/download/{job_id}/logos"
         }
+        if "holder_3mf" in job.files:
+            response.download_urls["holder"] = f"/api/download/{job_id}/holder"
 
     return response
 
@@ -2193,6 +2282,29 @@ async def download_logos_stl(job_id: str, request: Request):
     )
 
 
+@app.get("/api/download/{job_id}/holder")
+async def download_holder_3mf(job_id: str, request: Request):
+    """Download globally cached holder 3MF (if container option was enabled)."""
+    job = JobStore.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    enforce_job_access(request, job)
+
+    if job.status != "completed" or "holder_3mf" not in job.files:
+        raise HTTPException(status_code=400, detail="Holder file not available")
+
+    file_path = job.files["holder_3mf"]
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    return FileResponse(
+        file_path,
+        media_type="application/vnd.ms-package.3dmanufacturing-3dmodel+xml",
+        filename=f"coaster_holder_{job_id}.3mf"
+    )
+
+
 @app.get("/api/preview-image/{job_id}")
 async def get_preview_image(job_id: str, request: Request):
     """Get the BFL generated image for review (before confirmation)."""
@@ -2258,6 +2370,8 @@ async def regenerate_job(
     bottom_rotate: Optional[int] = Form(None),
     nozzle_diameter: Optional[float] = Form(None),
     auto_thicken: Optional[bool] = Form(None),
+    print_container: Optional[bool] = Form(None),
+    container_coaster_count: Optional[int] = Form(None),
 ):
     """Regenerate preview image from original source image without re-upload."""
     job = JobStore.get_job(job_id)
@@ -2280,6 +2394,14 @@ async def regenerate_job(
     resolved_top_logo_depth = (
         top_logo_depth if top_logo_depth is not None else current_top_logo_depth
     )
+    resolved_print_container = (
+        print_container if print_container is not None else getattr(current_params, "print_container", False)
+    )
+    resolved_container_count = (
+        container_coaster_count
+        if container_coaster_count is not None
+        else getattr(current_params, "container_coaster_count", 6)
+    )
 
     job.params = _build_process_params(
         diameter=diameter if diameter is not None else current_params.diameter,
@@ -2293,6 +2415,8 @@ async def regenerate_job(
         bottom_rotate=bottom_rotate if bottom_rotate is not None else current_params.bottom_rotate,
         nozzle_diameter=nozzle_diameter if nozzle_diameter is not None else current_params.nozzle_diameter,
         auto_thicken=auto_thicken if auto_thicken is not None else current_params.auto_thicken,
+        print_container=resolved_print_container,
+        container_coaster_count=resolved_container_count,
     )
     job.stamp_text = effective_stamp_text
 
@@ -2350,6 +2474,8 @@ async def retry_job(
     bottom_rotate: int = Form(0),
     nozzle_diameter: float = Form(0.4),
     auto_thicken: bool = Form(True),
+    print_container: bool = Form(False),
+    container_coaster_count: int = Form(6),
     preprocess_face_crop: bool = Form(PREPROCESS_DEFAULT_FACE_CROP),
     preprocess_face_padding: float = Form(PREPROCESS_DEFAULT_FACE_PADDING),
     preprocess_auto_downsize: bool = Form(PREPROCESS_DEFAULT_AUTO_DOWNSIZE),
@@ -2415,6 +2541,8 @@ async def retry_job(
         bottom_rotate=bottom_rotate,
         nozzle_diameter=nozzle_diameter,
         auto_thicken=auto_thicken,
+        print_container=print_container,
+        container_coaster_count=container_coaster_count,
     )
     
     effective_api_key = _resolve_effective_api_key("")

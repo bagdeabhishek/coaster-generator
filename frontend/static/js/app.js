@@ -73,6 +73,8 @@ const elements = {
     bottomRotate: document.getElementById('bottomRotate'),
     flipHorizontal: document.getElementById('flipHorizontal'),
     autoThicken: document.getElementById('autoThicken'),
+    printContainer: document.getElementById('printContainer'),
+    containerCoasterCount: document.getElementById('containerCoasterCount'),
     preprocessFaceCrop: document.getElementById('preprocessFaceCrop'),
     preprocessFacePadding: document.getElementById('preprocessFacePadding'),
     preprocessAutoDownsize: document.getElementById('preprocessAutoDownsize'),
@@ -127,6 +129,7 @@ const elements = {
     
     // Downloads
     downloadCoaster: document.getElementById('downloadCoaster'),
+    downloadHolder: document.getElementById('downloadHolder'),
 };
 
 // ============================================
@@ -415,6 +418,17 @@ function initForm() {
         elements.preprocessFaceCrop.addEventListener('change', syncFacePaddingState);
         syncFacePaddingState();
     }
+
+    if (elements.printContainer && elements.containerCoasterCount) {
+        const syncContainerFields = () => {
+            const enabled = elements.printContainer.checked;
+            elements.containerCoasterCount.disabled = !enabled;
+            elements.containerCoasterCount.classList.toggle('bg-zinc-100', !enabled);
+            elements.containerCoasterCount.classList.toggle('dark:bg-zinc-900/60', !enabled);
+        };
+        elements.printContainer.addEventListener('change', syncContainerFields);
+        syncContainerFields();
+    }
     
     elements.dismissErrorBtn.addEventListener('click', () => {
         elements.errorSection.classList.add('hidden');
@@ -454,6 +468,8 @@ async function handleSubmit() {
     formData.append('bottom_rotate', elements.bottomRotate.value);
     formData.append('flip_horizontal', elements.flipHorizontal.checked);
     formData.append('auto_thicken', elements.autoThicken.checked);
+    formData.append('print_container', elements.printContainer ? elements.printContainer.checked : false);
+    formData.append('container_coaster_count', elements.containerCoasterCount ? elements.containerCoasterCount.value || '6' : '6');
     appendPreprocessSettings(formData);
     
     // Show loading state
@@ -704,6 +720,8 @@ elements.regenerateBtn.addEventListener('click', async function() {
         formData.append('bottom_rotate', elements.bottomRotate.value);
         formData.append('flip_horizontal', elements.flipHorizontal.checked);
         formData.append('auto_thicken', elements.autoThicken.checked);
+        formData.append('print_container', elements.printContainer ? elements.printContainer.checked : false);
+        formData.append('container_coaster_count', elements.containerCoasterCount ? elements.containerCoasterCount.value || '6' : '6');
 
         const response = await fetch(`/api/regenerate/${currentJobId}`, {
             method: 'POST',
@@ -776,6 +794,8 @@ elements.retrySubmitBtn.addEventListener('click', async function() {
     formData.append('bottom_rotate', elements.bottomRotate.value);
     formData.append('flip_horizontal', elements.flipHorizontal.checked);
     formData.append('auto_thicken', elements.autoThicken.checked);
+    formData.append('print_container', elements.printContainer ? elements.printContainer.checked : false);
+    formData.append('container_coaster_count', elements.containerCoasterCount ? elements.containerCoasterCount.value || '6' : '6');
     appendPreprocessSettings(formData);
     
     try {
@@ -1068,8 +1088,18 @@ async function show3DViewer(urls) {
     elements.downloadsSection.classList.remove('hidden');
     elements.downloadsSection.classList.add('animate-fade-in');
 
-    // Update download link (3MF file)
+    // Update download links
     elements.downloadCoaster.href = urls.combined;
+    if (elements.downloadHolder) {
+        if (urls.holder) {
+            elements.downloadHolder.href = urls.holder;
+            elements.downloadHolder.classList.remove('hidden');
+            elements.downloadHolder.classList.add('flex');
+        } else {
+            elements.downloadHolder.classList.add('hidden');
+            elements.downloadHolder.classList.remove('flex');
+        }
+    }
 
     // Initialize viewer if not already done
     // Wait for the DOM to update so the container has proper dimensions

@@ -260,6 +260,23 @@
                                     </div>
 
                                     <div class="pt-3 border-t border-zinc-200 dark:border-zinc-700 space-y-3">
+                                        <p class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Optional Container (Vase-Safe)</p>
+                                        <div class="flex items-center">
+                                            <input type="checkbox" id="printContainer" name="print_container"
+                                                class="w-4 h-4 text-primary-600 border-zinc-300 rounded focus:ring-primary-500 dark:bg-zinc-700 dark:border-zinc-600">
+                                            <label for="printContainer" class="ml-2 text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                                                Print Container (include holder in final 3MF)
+                                            </label>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Number of Coasters to Hold</label>
+                                            <input type="number" id="containerCoasterCount" name="container_coaster_count" value="6" min="1" max="50" step="1" disabled
+                                                class="w-full px-4 py-2.5 rounded-md border border-zinc-300 dark:border-zinc-600 bg-zinc-100 dark:bg-zinc-900/60 text-zinc-900 dark:text-white focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all duration-200 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                                            <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Container wall thickness auto-matches nozzle diameter for single-wall vase-safe printing.</p>
+                                        </div>
+                                    </div>
+
+                                    <div class="pt-3 border-t border-zinc-200 dark:border-zinc-700 space-y-3">
                                         <p class="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Input Preprocessing</p>
                                         <div class="flex items-center">
                                             <input type="checkbox" id="preprocessFaceCrop" name="preprocess_face_crop" {% if config.preprocess_default_face_crop %}checked{% endif %}
@@ -418,8 +435,12 @@
                                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                                     Download Coaster (3MF)
                                 </a>
+                                <a href="#" id="downloadHolder" class="hidden w-full bg-zinc-700 hover:bg-zinc-600 dark:bg-emerald-700 dark:hover:bg-emerald-800 text-white font-medium py-3 px-6 rounded-xl shadow-sm text-center transition-all duration-200 hover:shadow-md active:scale-[0.98] flex items-center justify-center gap-2 text-base">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                                    Download Holder (3MF)
+                                </a>
                                 <p class="text-sm text-zinc-500 dark:text-zinc-400 text-center">
-                                    Contains body + logos with different colors. Compatible with OrcaSlicer, PrusaSlicer, Cura, and Bambu Studio.
+                                    Coaster download contains body + logos (and optionally holder) with separate objects for slicers like OrcaSlicer, PrusaSlicer, Cura, and Bambu Studio.
                                 </p>
                             </div>
                         </div>
