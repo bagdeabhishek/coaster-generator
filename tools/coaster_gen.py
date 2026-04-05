@@ -25,7 +25,8 @@ from shapely.ops import unary_union
 class CoasterParams:
     diameter: float = 100.0
     thickness: float = 5.0
-    logo_depth: float = 0.6
+    top_logo_depth: float = 0.6
+    bottom_logo_depth: float = 0.6
     top_logo_height: float = 0.0
     scale: float = 0.85
     flip_horizontal: bool = True
@@ -41,6 +42,8 @@ class CoasterGenerator:
         diameter: float = 100.0,
         thickness: float = 5.0,
         logo_depth: float = 0.6,
+        top_logo_depth: float | None = None,
+        bottom_logo_depth: float | None = None,
         top_logo_height: float = 0.0,
         scale: float = 0.85,
         flip_horizontal: bool = True,
@@ -49,10 +52,14 @@ class CoasterGenerator:
         nozzle_diameter: float = 0.4,
         auto_thicken: bool = True,
     ) -> None:
+        resolved_bottom_logo_depth = logo_depth if bottom_logo_depth is None else bottom_logo_depth
+        resolved_top_logo_depth = logo_depth if top_logo_depth is None else top_logo_depth
+
         self.params = CoasterParams(
             diameter=diameter,
             thickness=thickness,
-            logo_depth=logo_depth,
+            top_logo_depth=resolved_top_logo_depth,
+            bottom_logo_depth=resolved_bottom_logo_depth,
             top_logo_height=top_logo_height,
             scale=scale,
             flip_horizontal=flip_horizontal,
@@ -370,41 +377,52 @@ class CoasterGenerator:
             centered = affinity.translate(poly, xoff=-center_x, yoff=-center_y)
             centered_polys.extend(self._explode_polygons(self._safe_polygon(centered)))
 
-        logo_meshes = []
-        for poly in centered_polys:
-            try:
-                logo_meshes.append(trimesh.creation.extrude_polygon(poly, height=p.logo_depth))
-            except Exception:
-                continue
-
-        if not logo_meshes:
-            raise RuntimeError("No valid logo meshes could be created")
-
-        logos_combined = trimesh.util.concatenate(logo_meshes)
-
-        # Top logo can optionally protrude above the coaster surface.
+        top_logo_depth = max(0.0, float(p.top_logo_depth))
+        bottom_logo_depth = max(0.0, float(p.bottom_logo_depth))
         top_logo_height = max(0.0, float(p.top_logo_height))
-        top_extrude_height = p.logo_depth + top_logo_height
-        top_logo = logos_combined.copy()
-        if top_extrude_height != p.logo_depth and p.logo_depth > 0:
-            top_logo.apply_scale([1.0, 1.0, top_extrude_height / p.logo_depth])
 
-        if p.top_rotate != 0:
-            top_logo.apply_transform(
-                trimesh.transformations.rotation_matrix(np.radians(p.top_rotate), [0, 0, 1])
-            )
-        top_logo.apply_translation([0, 0, (p.thickness / 2) - p.logo_depth])
+        top_extrude_height = top_logo_depth + top_logo_height
+        bottom_extrude_height = bottom_logo_depth
 
-        # Bottom logo keeps existing inset-only behavior.
-        bottom_logo = logos_combined.copy()
-        if p.bottom_rotate != 0:
-            bottom_logo.apply_transform(
-                trimesh.transformations.rotation_matrix(np.radians(p.bottom_rotate), [0, 0, 1])
-            )
-        bottom_logo.apply_transform(trimesh.transformations.rotation_matrix(np.pi, [1, 0, 0]))
-        bottom_logo.apply_translation([0, 0, (-p.thickness / 2) + p.logo_depth])
+        top_logo = None
+        if top_extrude_height > 0:
+            top_meshes = []
+            for poly in centered_polys:
+                try:
+                    top_meshes.append(trimesh.creation.extrude_polygon(poly, height=top_extrude_height))
+                except Exception:
+                    continue
+            if top_meshes:
+                top_logo = trimesh.util.concatenate(top_meshes)
+                if p.top_rotate != 0:
+                    top_logo.apply_transform(
+                        trimesh.transformations.rotation_matrix(np.radians(p.top_rotate), [0, 0, 1])
+                    )
+                # Anchor top logo base at surface - top_logo_depth.
+                top_logo.apply_translation([0, 0, (p.thickness / 2) - top_logo_depth])
 
-        final_logos = trimesh.util.concatenate([top_logo, bottom_logo])
+        bottom_logo = None
+        if bottom_extrude_height > 0:
+            bottom_meshes = []
+            for poly in centered_polys:
+                try:
+                    bottom_meshes.append(trimesh.creation.extrude_polygon(poly, height=bottom_extrude_height))
+                except Exception:
+                    continue
+            if bottom_meshes:
+                bottom_logo = trimesh.util.concatenate(bottom_meshes)
+                if p.bottom_rotate != 0:
+                    bottom_logo.apply_transform(
+                        trimesh.transformations.rotation_matrix(np.radians(p.bottom_rotate), [0, 0, 1])
+                    )
+                bottom_logo.apply_transform(trimesh.transformations.rotation_matrix(np.pi, [1, 0, 0]))
+                bottom_logo.apply_translation([0, 0, (-p.thickness / 2) + bottom_logo_depth])
+
+        logo_parts = [m for m in (top_logo, bottom_logo) if m is not None]
+        if not logo_parts:
+            raise RuntimeError("No valid top/bottom logo meshes could be created")
+
+        final_logos = trimesh.util.concatenate(logo_parts)
         return base, final_logos
 
     def _export_three_mf(self, base: trimesh.Trimesh, logos: trimesh.Trimesh, output_3mf_path: str) -> None:
