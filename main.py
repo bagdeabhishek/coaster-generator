@@ -1660,13 +1660,15 @@ async def process_coaster_job(
 
 def _holder_cache_key(params: ProcessRequest) -> str:
     wall = max(0.35, min(float(params.nozzle_diameter), 1.0))
+    top_extra = max(0.0, float(getattr(params, "top_logo_height", 0.0)))
     return (
-        "holder-v1"
+        "holder-v2"
         f"-d{params.diameter:.2f}"
         f"-t{params.thickness:.2f}"
         f"-n{int(params.container_coaster_count)}"
         f"-w{wall:.2f}"
-        "-rc1.20-tc1.00-b0.80"
+        f"-te{top_extra:.2f}"
+        "-rc2.00-tc2.50-pc0.55-b0.80"
     ).replace(".", "p")
 
 
@@ -1691,6 +1693,10 @@ def _resolve_holder_assets(params: ProcessRequest) -> tuple[str, str, Any, dict]
                 coaster_thickness=params.thickness,
                 coaster_count=params.container_coaster_count,
                 nozzle_diameter=params.nozzle_diameter,
+                coaster_extra_height_mm=max(0.0, float(getattr(params, "top_logo_height", 0.0))),
+                radial_clearance_mm=2.0,
+                top_clearance_mm=2.5,
+                per_coaster_clearance_mm=0.55,
             )
             holder_mesh.export(holder_stl_path)
             CoasterGenerator.export_single_mesh_3mf(holder_mesh, holder_3mf_path, object_name="coaster_holder")
