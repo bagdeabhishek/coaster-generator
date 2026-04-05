@@ -425,45 +425,81 @@ class CoasterGenerator:
         final_logos = trimesh.util.concatenate(logo_parts)
         return base, final_logos
 
-    def _export_three_mf(self, base: trimesh.Trimesh, logos: trimesh.Trimesh, output_3mf_path: str) -> None:
+    @staticmethod
+    def _append_mesh_object(xml_content: list[str], object_id: int, object_name: str, mesh: trimesh.Trimesh) -> None:
+        xml_content.append(f'    <object id="{object_id}" name="{object_name}" type="model">')
+        xml_content.append("      <mesh>")
+        xml_content.append("        <vertices>")
+        for vertex in mesh.vertices:
+            xml_content.append(f'          <vertex x="{vertex[0]}" y="{vertex[1]}" z="{vertex[2]}" />')
+        xml_content.append("        </vertices>")
+        xml_content.append("        <triangles>")
+        for face in mesh.faces:
+            xml_content.append(f'          <triangle v1="{face[0]}" v2="{face[1]}" v3="{face[2]}" />')
+        xml_content.append("        </triangles>")
+        xml_content.append("      </mesh>")
+        xml_content.append("    </object>")
+
+    @staticmethod
+    def export_single_mesh_3mf(mesh: trimesh.Trimesh, output_3mf_path: str, object_name: str = "mesh") -> None:
+        xml_content = ['<?xml version="1.0" encoding="utf-8"?>']
+        xml_content.append('<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" unit="millimeter" xml:lang="en-US">')
+        xml_content.append("  <resources>")
+        CoasterGenerator._append_mesh_object(xml_content, 1, object_name, mesh)
+        xml_content.append("  </resources>")
+        xml_content.append("  <build>")
+        xml_content.append('    <item objectid="1" />')
+        xml_content.append("  </build>")
+        xml_content.append("</model>")
+
+        with zipfile.ZipFile(output_3mf_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("3D/3dmodel.model", "\n".join(xml_content))
+            zf.writestr(
+                "_rels/.rels",
+                """<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>
+<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">
+  <Relationship Target=\"/3D/3dmodel.model\" Id=\"rel0\" Type=\"http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel\" />
+</Relationships>""",
+            )
+            zf.writestr(
+                "[Content_Types].xml",
+                """<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>
+<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">
+  <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\" />
+  <Default Extension=\"model\" ContentType=\"application/vnd.ms-package.3dmanufacturing-3dmodel+xml\" />
+</Types>""",
+            )
+
+    def _export_three_mf(
+        self,
+        base: trimesh.Trimesh,
+        logos: trimesh.Trimesh,
+        output_3mf_path: str,
+        holder: trimesh.Trimesh | None = None,
+    ) -> None:
         xml_content = ['<?xml version="1.0" encoding="utf-8"?>']
         xml_content.append('<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" unit="millimeter" xml:lang="en-US">')
         xml_content.append("  <resources>")
 
-        body_id = 1
-        logos_id = 2
-        composite_id = 3
+        component_meshes: list[tuple[str, trimesh.Trimesh]] = [
+            ("coaster_body", base),
+            ("coaster_logos", logos),
+        ]
+        if holder is not None:
+            component_meshes.append(("coaster_holder", holder))
 
-        xml_content.append(f'    <object id="{body_id}" name="coaster_body" type="model">')
-        xml_content.append("      <mesh>")
-        xml_content.append("        <vertices>")
-        for vertex in base.vertices:
-            xml_content.append(f'          <vertex x="{vertex[0]}" y="{vertex[1]}" z="{vertex[2]}" />')
-        xml_content.append("        </vertices>")
-        xml_content.append("        <triangles>")
-        for face in base.faces:
-            xml_content.append(f'          <triangle v1="{face[0]}" v2="{face[1]}" v3="{face[2]}" />')
-        xml_content.append("        </triangles>")
-        xml_content.append("      </mesh>")
-        xml_content.append("    </object>")
+        object_id = 1
+        component_object_ids: list[int] = []
+        for name, mesh in component_meshes:
+            CoasterGenerator._append_mesh_object(xml_content, object_id, name, mesh)
+            component_object_ids.append(object_id)
+            object_id += 1
 
-        xml_content.append(f'    <object id="{logos_id}" name="coaster_logos" type="model">')
-        xml_content.append("      <mesh>")
-        xml_content.append("        <vertices>")
-        for vertex in logos.vertices:
-            xml_content.append(f'          <vertex x="{vertex[0]}" y="{vertex[1]}" z="{vertex[2]}" />')
-        xml_content.append("        </vertices>")
-        xml_content.append("        <triangles>")
-        for face in logos.faces:
-            xml_content.append(f'          <triangle v1="{face[0]}" v2="{face[1]}" v3="{face[2]}" />')
-        xml_content.append("        </triangles>")
-        xml_content.append("      </mesh>")
-        xml_content.append("    </object>")
-
-        xml_content.append(f'    <object id="{composite_id}" name="coaster" type="model">')
+        composite_id = object_id
+        xml_content.append(f'    <object id="{composite_id}" name="coaster_bundle" type="model">')
         xml_content.append("      <components>")
-        xml_content.append(f'        <component objectid="{body_id}" />')
-        xml_content.append(f'        <component objectid="{logos_id}" />')
+        for oid in component_object_ids:
+            xml_content.append(f'        <component objectid="{oid}" />')
         xml_content.append("      </components>")
         xml_content.append("    </object>")
 
@@ -496,6 +532,7 @@ class CoasterGenerator:
         svg_string: str,
         output_dir: str,
         file_prefix: str | None = None,
+        holder_mesh: trimesh.Trimesh | None = None,
     ) -> Tuple[str, str, str]:
         """Generate 3MF + STL files from SVG string."""
         base_mesh, logos_mesh = self._build_meshes_from_svg(svg_string)
@@ -507,7 +544,7 @@ class CoasterGenerator:
 
         base_mesh.export(body_stl_path)
         logos_mesh.export(logos_stl_path)
-        self._export_three_mf(base_mesh, logos_mesh, output_3mf_path)
+        self._export_three_mf(base_mesh, logos_mesh, output_3mf_path, holder=holder_mesh)
 
         return output_3mf_path, body_stl_path, logos_stl_path
 
@@ -518,6 +555,7 @@ class CoasterGenerator:
         stamp_text: str = "",
         is_preview: bool = False,
         file_prefix: str | None = None,
+        holder_mesh: trimesh.Trimesh | None = None,
     ) -> Tuple[str, str, str]:
         del stamp_text, is_preview
 
@@ -525,4 +563,4 @@ class CoasterGenerator:
             image_bytes = f.read()
 
         svg_string = self._vectorize_image(image_bytes, output_dir)
-        return self.generate_from_svg(svg_string, output_dir, file_prefix=file_prefix)
+        return self.generate_from_svg(svg_string, output_dir, file_prefix=file_prefix, holder_mesh=holder_mesh)
