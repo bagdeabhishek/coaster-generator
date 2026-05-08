@@ -1,19 +1,11 @@
 """
 Database configuration for CoastGen.
-Supports both SQLite (development) and PostgreSQL (production/Supabase).
+SQLite-only mode.
 """
 
 import os
 
-# Database configuration
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DB_PATH = os.path.join(os.environ.get("TEMP_DIR", "./temp"), "app_data.db")
+USE_POSTGRES = False
 
-# Check if we're using PostgreSQL (Supabase) or SQLite
-USE_POSTGRES = DATABASE_URL.startswith("postgres") or DATABASE_URL.startswith("postgresql")
-
-if USE_POSTGRES:
-    # PostgreSQL/Supebase configuration
-    print("Using PostgreSQL database (Supabase)")
-else:
-    # SQLite configuration (fallback for local dev)
-    print("Using SQLite database (local development)")
+print(f"Using SQLite database: {DB_PATH}")
