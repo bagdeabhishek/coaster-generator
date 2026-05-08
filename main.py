@@ -42,41 +42,22 @@ import concurrent.futures
 from tools.coaster_gen import CoasterGenerator
 from tools.coaster_holder import build_vase_safe_holder_mesh
 
-# Auth and billing
-try:
-    from db_store import (
-        init_db,
-        create_user,
-        get_user_by_email,
-        get_user_by_id,
-        get_user_by_oauth,
-        link_oauth_identity,
-        set_subscription,
-        record_webhook,
-        is_webhook_processed,
-        webhook_processing_lock,
-        clear_all_quotas,
-        USE_POSTGRES
-    )
-    print(f"Using {'PostgreSQL' if USE_POSTGRES else 'SQLite'} database")
-except ImportError:
-    # Fallback to old module for backward compatibility
-    from auth_quota_store import (
-        init_db,
-        create_user,
-        get_user_by_email,
-        get_user_by_id,
-        get_user_by_oauth,
-        link_oauth_identity,
-        set_subscription,
-        record_webhook,
-        is_webhook_processed,
-        clear_all_quotas,
-    )
-    from contextlib import nullcontext
-    webhook_processing_lock = lambda _webhook_id: nullcontext()
-    USE_POSTGRES = False
-    print("Using legacy SQLite database")
+# Auth and billing (SQLite-only)
+from db_store import (
+    init_db,
+    create_user,
+    get_user_by_email,
+    get_user_by_id,
+    get_user_by_oauth,
+    link_oauth_identity,
+    set_subscription,
+    record_webhook,
+    is_webhook_processed,
+    webhook_processing_lock,
+    clear_all_quotas,
+    USE_POSTGRES,
+)
+print("Using SQLite database")
 from quota_service import check_quota, check_and_consume_quota_atomic
 
 # Security imports
