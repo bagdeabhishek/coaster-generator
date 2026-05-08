@@ -18,6 +18,9 @@ db_lock = threading.Lock()
 
 def get_connection() -> sqlite3.Connection:
     """Get a thread-local database connection."""
+    db_dir = os.path.dirname(DB_PATH)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL;")  # Enable WAL mode for concurrent reads/writes
     conn.execute("PRAGMA synchronous=NORMAL;") 
