@@ -22,8 +22,10 @@ def resolve_holder_dimensions(
     coaster_thickness: float,
     coaster_count: int,
     nozzle_diameter: float,
-    radial_clearance_mm: float = 1.2,
-    top_clearance_mm: float = 1.0,
+    radial_clearance_mm: float = 2.0,
+    top_clearance_mm: float = 2.5,
+    per_coaster_clearance_mm: float = 0.55,
+    coaster_extra_height_mm: float = 0.0,
     bottom_thickness_mm: float = 0.8,
 ) -> dict:
     """Resolve holder dimensions from user-friendly inputs.
@@ -36,9 +38,9 @@ def resolve_holder_dimensions(
     inner_radius = (float(coaster_diameter) / 2.0) + float(radial_clearance_mm)
     outer_radius = inner_radius + wall_thickness
 
-    inner_height = (count * float(coaster_thickness)) + float(top_clearance_mm)
+    effective_coaster_height = float(coaster_thickness) + max(0.0, float(coaster_extra_height_mm)) + float(per_coaster_clearance_mm)
+    inner_height = (count * effective_coaster_height) + float(top_clearance_mm)
     total_height = inner_height + float(bottom_thickness_mm)
-
     return {
         "coaster_count": count,
         "wall_thickness": wall_thickness,
@@ -49,6 +51,8 @@ def resolve_holder_dimensions(
         "total_height": total_height,
         "radial_clearance": float(radial_clearance_mm),
         "top_clearance": float(top_clearance_mm),
+        "per_coaster_clearance": float(per_coaster_clearance_mm),
+        "coaster_extra_height": float(coaster_extra_height_mm),
     }
 
 
@@ -57,8 +61,10 @@ def build_vase_safe_holder_mesh(
     coaster_thickness: float,
     coaster_count: int,
     nozzle_diameter: float,
-    radial_clearance_mm: float = 1.2,
-    top_clearance_mm: float = 1.0,
+    radial_clearance_mm: float = 2.0,
+    top_clearance_mm: float = 2.5,
+    per_coaster_clearance_mm: float = 0.55,
+    coaster_extra_height_mm: float = 0.0,
     bottom_thickness_mm: float = 0.8,
     polygon_resolution: int = 64,
 ) -> Tuple[trimesh.Trimesh, dict]:
@@ -73,6 +79,8 @@ def build_vase_safe_holder_mesh(
         nozzle_diameter=nozzle_diameter,
         radial_clearance_mm=radial_clearance_mm,
         top_clearance_mm=top_clearance_mm,
+        per_coaster_clearance_mm=per_coaster_clearance_mm,
+        coaster_extra_height_mm=coaster_extra_height_mm,
         bottom_thickness_mm=bottom_thickness_mm,
     )
 
